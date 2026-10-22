@@ -129,6 +129,9 @@ BR.RoutingOptions = L.Evented.extend({
         }
 
         if (L.BRouter.isCustomProfile(profile)) {
+            if (localStorage.getItem('routingprofile.customText')) {
+                localStorage.setItem('routingprofile', 'Custom');
+            }
             return;
         }
 
@@ -144,8 +147,15 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     _getChangeHandler() {
-        return L.bind(function (evt) {
-            this.rememberProfile(evt.target.options[evt.target.options.selectedIndex].value);
+        return L.bind(function (evt, clickedIndex) {
+            // bootstrap-select also emits changes for programmatic startup/hash
+            // updates, with no clicked index. Only persist an actual user choice.
+            if (clickedIndex != null) {
+                const option = evt.target.options[clickedIndex];
+                if (option.parentElement.id === 'profile') {
+                    this.rememberProfile(option.value);
+                }
+            }
             this.fire('update', { options: this.getOptions() });
         }, this);
     },

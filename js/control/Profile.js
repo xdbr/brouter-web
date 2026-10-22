@@ -1,6 +1,6 @@
 BR.Profile = L.Evented.extend({
     cache: {},
-    saveWarningShown: false,
+    storageKey: 'routingprofile.customText',
 
     initialize() {
         var textArea = L.DomUtil.get('profile_upload');
@@ -33,6 +33,15 @@ BR.Profile = L.Evented.extend({
 
         this.editor.markClean();
         this._setValue('');
+
+        try {
+            localStorage.removeItem(this.storageKey);
+            if (localStorage.getItem('routingprofile') === 'Custom') {
+                localStorage.removeItem('routingprofile');
+            }
+        } catch (err) {
+            // Clearing the editor must also work when storage is unavailable.
+        }
 
         this.fire('clear');
         button.blur();
@@ -73,6 +82,42 @@ BR.Profile = L.Evented.extend({
         }
 
         if (cb && !loading) cb();
+    },
+
+    rememberCustomProfile(profileText) {
+        try {
+            localStorage.setItem(this.storageKey, profileText);
+            localStorage.setItem('routingprofile', 'Custom');
+        } catch (err) {
+            this.message.showWarning(i18next.t('warning.temporary-profile'));
+        }
+    },
+
+    restoreCustomProfile() {
+        let profileText;
+        try {
+            if (localStorage.getItem('routingprofile') !== 'Custom') return false;
+            profileText = localStorage.getItem(this.storageKey);
+        } catch (err) {
+            return false;
+        }
+        if (!profileText) return false;
+
+        this.profileName = 'Custom';
+        this.selectedProfileName = 'Custom';
+        this._setValue(profileText);
+        this.fire('update', {
+            profileText,
+            restoring: true,
+            callback: (err, profileId) => {
+                if (!err) {
+                    this.profileName = profileId;
+                    this.selectedProfileName = profileId;
+                    this.cache[profileId] = profileText;
+                }
+            },
+        });
+        return true;
     },
 
     show() {
@@ -126,11 +171,6 @@ BR.Profile = L.Evented.extend({
                 if (!err) {
                     this.profileName = profileId;
                     this.cache[profileId] = profileText;
-
-                    if (!this.saveWarningShown) {
-                        this.message.showWarning(i18next.t('warning.temporary-profile'));
-                        this.saveWarningShown = true;
-                    }
                 }
             }, this),
         });

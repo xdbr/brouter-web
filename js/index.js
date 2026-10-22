@@ -266,7 +266,17 @@
         profile.on('update', function (evt) {
             BR.message.hide();
             var profileId = routingOptions.getCustomProfile();
+            const selectedProfile = routingOptions.getOptions().profile;
+            // Keep the source even if uploading fails or the temporary server copy expires.
+            profile.rememberCustomProfile(evt.profileText);
             router.uploadProfile(profileId, evt.profileText, function (err, profileId) {
+                if (
+                    evt.restoring &&
+                    (routingOptions.getOptions().profile !== selectedProfile ||
+                        profile.editor.getValue() !== evt.profileText)
+                ) {
+                    return;
+                }
                 if (!err) {
                     routingOptions.setCustomProfile(profileId, true);
                     updateRoute({
@@ -288,6 +298,7 @@
         profile.on('clear', function (evt) {
             profile.message.hide();
             routingOptions.setCustomProfile(null);
+            routingOptions.rememberProfile(routingOptions.getOptions().profile);
         });
         trackMessages = new BR.TrackMessages(map, {
             requestUpdate,
@@ -507,6 +518,11 @@
         // only after hash init, by using the same delay
         setTimeout(function () {
             layersControl.activateDefaultBaseLayer();
+            // Custom IDs are omitted from permalinks, so map/route hashes must
+            // still allow restoring local text. An explicit profile takes priority.
+            if (!new URLSearchParams(location.hash.slice(1)).has('profile')) {
+                profile.restoreCustomProfile();
+            }
         }, urlHash.changeDefer);
 
         routingOptions.on('update', urlHash.onMapMove, urlHash);

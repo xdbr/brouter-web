@@ -23,6 +23,7 @@ let defaultProfile;
 beforeEach(() => {
     document.body = indexHtml.body.cloneNode(true);
     location.hash = '';
+    localStorage.clear();
     // as used in BRouter.getUrlParams
     defaultProfile = BR.conf.profiles[0];
 });
@@ -64,4 +65,45 @@ describe('Profile selection', () => {
         const profile = routingOptions.getOptions().profile;
         expect(profile).toEqual('shortest');
     });
+});
+
+describe('remembering custom selections', () => {
+    test('remembers the local custom profile rather than its temporary server ID', () => {
+        const routingOptions = new BR.RoutingOptions();
+        localStorage.setItem('routingprofile.customText', 'assign validForBikes true');
+        routingOptions.rememberProfile('custom_temporary');
+        expect(localStorage.getItem('routingprofile')).toBe('Custom');
+        routingOptions.rememberProfile('shortest');
+        expect(localStorage.getItem('routingprofile')).toBe('shortest');
+        expect(localStorage.getItem('routingprofile.customText')).not.toBeNull();
+    });
+
+    test('does not remember a custom ID without saved text', () => {
+        const routingOptions = new BR.RoutingOptions();
+        routingOptions.rememberProfile('trekking');
+        routingOptions.rememberProfile('custom_temporary');
+        expect(localStorage.getItem('routingprofile')).toBe('trekking');
+    });
+});
+
+test('programmatic startup selection does not overwrite the saved custom marker', () => {
+    localStorage.setItem('routingprofile.customText', 'assign validForBikes true');
+    localStorage.setItem('routingprofile', 'Custom');
+    location.hash = '#map=12/48.0305/11.6027/standard&lonlats=11.57,48.12;11.56,48.04';
+    $('.selectpicker').selectpicker();
+    const routingOptions = new BR.RoutingOptions();
+    routingOptions.setOptions({});
+    expect(localStorage.getItem('routingprofile')).toBe('Custom');
+});
+
+test('a user selection still replaces the saved custom marker', () => {
+    localStorage.setItem('routingprofile.customText', 'assign validForBikes true');
+    localStorage.setItem('routingprofile', 'Custom');
+    $('.selectpicker').selectpicker();
+    const routingOptions = new BR.RoutingOptions();
+    const select = document.getElementById('profile-alternative');
+    const index = Array.from(select.options).findIndex((option) => option.value === 'shortest');
+    routingOptions.setOptions({ profile: 'shortest' });
+    $(select).trigger('changed.bs.select', [index, true, null]);
+    expect(localStorage.getItem('routingprofile')).toBe('shortest');
 });

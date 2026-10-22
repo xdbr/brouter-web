@@ -59,6 +59,7 @@ let profile;
 
 beforeEach(() => {
     document.body = indexHtml.body.cloneNode(true);
+    localStorage.clear();
     profile = new BR.Profile();
 });
 
@@ -149,4 +150,61 @@ test('_buildCustomProfile', () => {
     expect(result[3]).toMatch(/isOne   = true/);
     expect(result[4]).toMatch(/optTwo  = 2/);
     expect(result[5]).toMatch(/three   = 3/);
+});
+
+describe('custom profile persistence', () => {
+    test('stores the complete text and a stable selection marker', () => {
+        profile.rememberCustomProfile(profileText);
+        expect(localStorage.getItem('routingprofile.customText')).toBe(profileText);
+        expect(localStorage.getItem('routingprofile')).toBe('Custom');
+    });
+
+    test('restores the editor and requests a fresh upload', () => {
+        profile.rememberCustomProfile(profileText);
+        const update = jest.fn((evt) => evt.callback(null, 'custom_fresh'));
+        profile.on('update', update);
+        expect(profile.restoreCustomProfile()).toBe(true);
+        expect(profile.editor.getValue()).toBe(profileText);
+        expect(update).toHaveBeenCalledWith(expect.objectContaining({ profileText, restoring: true }));
+        expect(profile.cache.custom_fresh).toBe(profileText);
+    });
+
+    test('does not restore when a built-in profile was selected last', () => {
+        profile.rememberCustomProfile(profileText);
+        localStorage.setItem('routingprofile', 'trekking');
+        expect(profile.restoreCustomProfile()).toBe(false);
+    });
+
+    test('keeps the text available after an upload failure', () => {
+        profile.rememberCustomProfile(profileText);
+        profile.on('update', (evt) => evt.callback(new Error('offline')));
+        expect(profile.restoreCustomProfile()).toBe(true);
+        expect(profile.editor.getValue()).toBe(profileText);
+        expect(localStorage.getItem('routingprofile.customText')).toBe(profileText);
+    });
+
+    test('handles blocked or full storage without breaking profile editing', () => {
+        profile.message.showWarning = jest.fn();
+        const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('storage unavailable');
+        });
+        try {
+            expect(() => profile.rememberCustomProfile(profileText)).not.toThrow();
+            expect(profile.message.showWarning).toHaveBeenCalled();
+        } finally {
+            write.mockRestore();
+        }
+    });
+
+    test('ignores a selection marker without profile text', () => {
+        localStorage.setItem('routingprofile', 'Custom');
+        expect(profile.restoreCustomProfile()).toBe(false);
+    });
+
+    test('clear removes the stored custom profile', () => {
+        profile.rememberCustomProfile(profileText);
+        profile.clear({ target: { blur() {} }, preventDefault() {} });
+        expect(localStorage.getItem('routingprofile.customText')).toBeNull();
+        expect(localStorage.getItem('routingprofile')).toBeNull();
+    });
 });
