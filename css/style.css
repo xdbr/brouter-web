@@ -1256,8 +1256,66 @@ table.dataTable.display tbody tr:hover.selected {
     margin-top: 18px;
     padding-top: 14px;
 }
-.profile-settings-section > h2 {
+.profile-settings-details > summary {
+    cursor: pointer;
+    padding: 4px 0;
+}
+.profile-settings-details[open] > summary {
     margin-bottom: 12px;
+}
+.profile-settings-details > summary > h2 {
+    display: inline;
+    margin: 0;
+}
+.profile-settings-details > summary:focus-visible {
+    outline: 2px solid #007bff;
+    outline-offset: 2px;
+}
+
+.profile-number-controls input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+    min-width: 0;
+}
+.profile-number-controls input::-webkit-inner-spin-button,
+.profile-number-controls input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.profile-number-step {
+    min-width: 34px;
+}
+.profile-number-default {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    color: #62696f;
+    font-size: 0.8rem;
+}
+.profile-number-reset {
+    padding-right: 0;
+}
+.profile-number-error {
+    margin: 4px 0 0;
+    font-size: 0.8rem;
+}
+.profile-number-error:empty {
+    display: none;
+}
+.profile-number .help-block {
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+@media (pointer: coarse) {
+    .profile-number-controls > .form-control,
+    .profile-number-step,
+    .profile-number-reset {
+        min-height: 44px;
+    }
+    .profile-number-step {
+        min-width: 44px;
+    }
 }
 
 .profile-toggle {

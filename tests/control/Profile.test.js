@@ -455,7 +455,8 @@ assign custom_value = 7 # %custom_value% | Custom | number
     profile._setValue(gravel.replace('---context:way', extra + '\n---context:way'));
     document.querySelector('input[name="bikerPower"]').value = '175';
     profile._setValue(profile._currentText());
-    expect(document.querySelector('#profile_params details')).toBeNull();
+    expect(document.querySelectorAll('#profile_params details')).toHaveLength(7);
+    expect(document.querySelectorAll('#profile_params details:not([open])')).toHaveLength(0);
     const contains = (section, name) => document.querySelector(`[data-profile-section="${section}"] [name="${name}"]`);
     expect(contains('rider', 'bikerPower').value).toBe('175');
     expect(contains('rider', 'totalMass')).not.toBeNull();
@@ -466,6 +467,21 @@ assign custom_value = 7 # %custom_value% | Custom | number
     expect(contains('preferences', 'allow_ferries')).not.toBeNull();
     expect(contains('other', 'custom_value')).not.toBeNull();
     expect(document.querySelectorAll('[data-profile-section="rider"]')).toHaveLength(1);
+});
+
+test('section choices survive form rebuilds and switching editor tabs', () => {
+    profile._setValue(require('../util/data/ridingProfile.js'));
+    const riderSection = () => document.querySelector('[data-profile-section="rider"] details');
+    const preferences = () => document.querySelector('[data-profile-section="preferences"] details');
+    riderSection().open = false;
+    profile._setValue(profile._currentText());
+    expect(riderSection().open).toBe(false);
+    expect(preferences().open).toBe(true);
+    expect(preferences().querySelector('summary h2')).not.toBeNull();
+    toggleSecondaryTab();
+    toggleSecondaryTab();
+    expect(riderSection().open).toBe(false);
+    expect(preferences().open).toBe(true);
 });
 
 describe('plain-language boolean switches', () => {
@@ -507,4 +523,152 @@ assign costfactor 1
         expect(profile._getFormValues().allow_ferries).toBe(false);
         expect(profile._getFormValues()).not.toHaveProperty('Allow ferries');
     });
+});
+
+describe('numeric profile controls', () => {
+    const numericProfile = `---context:global
+assign totalMass = 90 # %totalMass% | Weight | number
+assign maxSpeed = 35 # %maxSpeed% | Speed | number
+assign bikerPower = 150 # %bikerPower% | Power | number
+assign C_r = 0.005 # %C_r% | Rolling resistance | number
+assign uphillcutoff = 1.5 # %uphillcutoff% | Gradient | number
+assign customOffset = -2e-3 # %customOffset% | Custom offset | number
+---context:way
+assign costfactor 1
+`;
+    const field = (name) => document.querySelector('#profile_params input[name="' + name + '"]');
+    const change = (name, value) => {
+        const input = field(name);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return input;
+    };
+    const reset = (name) => field(name).closest('.profile-number').querySelector('.profile-number-reset');
+
+    beforeEach(() => {
+        i18next.init({
+            lng: 'en',
+            initImmediate: false,
+            resources: { en: { translation: require('../../locales/en.json') } },
+        });
+        profile._setValue(numericProfile);
+    });
+
+    test('shows units beside inputs and keeps decimal and custom values intact', () => {
+        expect(field('totalMass').labels[0].textContent).toBe('Total weight');
+        expect(document.getElementById('profile-unit-totalMass').textContent).toBe('kg');
+        expect(document.getElementById('profile-default-maxSpeed').textContent).toBe('Starting value: 35 km/h');
+        expect(field('totalMass').getAttribute('aria-describedby')).toContain('profile-unit-totalMass');
+        expect(field('C_r').value).toBe('0.005');
+        expect(field('customOffset').value).toBe('-0.002');
+        expect(field('customOffset').hasAttribute('min')).toBe(false);
+        expect(profile._currentText()).toBe(numericProfile);
+        expect(profile._currentText()).not.toContain('brouter-web numeric defaults');
+    });
+
+    test('increments use meaningful steps without limiting manually entered precision', () => {
+        field('bikerPower').closest('.profile-number').querySelectorAll('.profile-number-step')[1].click();
+        expect(field('bikerPower').value).toBe('155');
+        field('C_r').closest('.profile-number').querySelectorAll('.profile-number-step')[0].click();
+        expect(field('C_r').value).toBe('0.004');
+        field('uphillcutoff').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+        expect(field('uphillcutoff').value).toBe('2');
+        const precise = change('bikerPower', '153.25');
+        expect(precise.checkValidity()).toBe(true);
+        expect(profile._validateParams()).toBe(true);
+        expect(profile._currentText()).toContain('assign bikerPower = 153.25');
+    });
+
+    test('reset restores the starting value and marks Default as edited', () => {
+        profile.defaultSelected = true;
+        change('totalMass', '94.5');
+        expect(profile.defaultSelected).toBe(false);
+        expect(reset('totalMass').disabled).toBe(false);
+        reset('totalMass').click();
+        expect(field('totalMass').value).toBe('90');
+        expect(reset('totalMass').disabled).toBe(true);
+        expect(document.activeElement).toBe(field('totalMass'));
+        expect(profile._currentText()).toBe(numericProfile);
+    });
+
+    test.each([
+        ['maxSpeed', '0', 'greater than 0'],
+        ['totalMass', '-1', 'greater than 0'],
+        ['bikerPower', '', 'valid number'],
+        ['C_r', '-0.001', '0 or more'],
+    ])('invalid %s blocks applying, named saving, and leaving the form', (name, value, message) => {
+        const input = change(name, value);
+        const details = input.closest('details');
+        details.open = false;
+        expect(document.getElementById('profile-error-' + name).textContent).toContain(message);
+        expect(input.getAttribute('aria-invalid')).toBe('true');
+        const update = jest.fn();
+        profile.on('update', update);
+        profile._save();
+        expect(details.open).toBe(true);
+        expect(update).not.toHaveBeenCalled();
+        document.getElementById('saved-profile-name').value = 'Invalid';
+        expect(profile.saveNamedProfile(false)).toBe(false);
+        expect(localStorage.getItem(profile.libraryKey)).toBeNull();
+        const hide = $.Event('hide.bs.tab');
+        $('#profileEditorTabs a[href="#profile_params_container"]').trigger(hide);
+        expect(hide.isDefaultPrevented()).toBe(true);
+        expect(document.activeElement).toBe(input);
+        reset(name).click();
+        expect(input.getAttribute('aria-invalid')).toBe('false');
+        expect(document.getElementById('profile-error-' + name).textContent).toBe('');
+        expect(profile._validateParams()).toBe(true);
+    });
+
+    test('does not impose arbitrary maximums or restrict unfamiliar signed settings', () => {
+        change('maxSpeed', '999');
+        change('customOffset', '-0.000125');
+        expect(profile._validateParams()).toBe(true);
+        const generated = profile._currentText();
+        profile._setValue(generated);
+        expect(field('maxSpeed').value).toBe('999');
+        expect(field('customOffset').value).toBe('-0.000125');
+        expect(profile._currentText()).toBe(generated);
+    });
+
+    test('starting values survive Apply, named save, reload, and repeated edits', () => {
+        profile.on('update', (evt) => {
+            profile.rememberCustomProfile(evt.profileText);
+            evt.callback(null, 'custom_numbers', evt.profileText);
+        });
+        change('totalMass', '95');
+        profile._save();
+        expect(field('totalMass').value).toBe('95');
+        expect(document.getElementById('profile-default-totalMass').textContent).toContain('90 kg');
+        change('totalMass', '100');
+        document.getElementById('saved-profile-name').value = 'My bike';
+        expect(profile.saveNamedProfile(false)).toBe(true);
+        const restored = new BR.Profile();
+        restored.on('update', (evt) => evt.callback(null, 'custom_restored'));
+        expect(restored.restoreCustomProfile()).toBe(true);
+        expect(field('totalMass').value).toBe('100');
+        reset('totalMass').click();
+        expect(field('totalMass').value).toBe('90');
+        expect(restored._currentText().match(/# brouter-web numeric defaults:/g)).toHaveLength(1);
+    });
+
+    test('full-editor round trips preserve starting values', () => {
+        change('bikerPower', '175');
+        toggleSecondaryTab();
+        expect(profile.editor.getValue()).toContain('assign bikerPower = 175');
+        toggleSecondaryTab();
+        expect(field('bikerPower').value).toBe('175');
+        reset('bikerPower').click();
+        expect(field('bikerPower').value).toBe('150');
+    });
+
+    test.each(['broken json', 'null', '[]', '{"totalMass":"wrong"}'])(
+        'falls back to the loaded value for unusable starting-value metadata: %s',
+        (metadata) => {
+            profile._setValue('# brouter-web numeric defaults: ' + metadata + '\n' + numericProfile);
+            change('totalMass', '100');
+            reset('totalMass').click();
+            expect(field('totalMass').value).toBe('90');
+        }
+    );
 });

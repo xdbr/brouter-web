@@ -1,5 +1,18 @@
 BR.Profile = L.Evented.extend({
     statics: {
+        numericSettings: {
+            totalMass: { unit: 'kg', increment: 1, min: 0, positive: true },
+            maxSpeed: { unit: 'km/h', increment: 1, min: 0, positive: true },
+            bikerPower: { unit: 'W', increment: 5, min: 0 },
+            S_C_x: { increment: 0.01, min: 0 },
+            C_r: { increment: 0.001, min: 0 },
+            uphillcost: { increment: 10 },
+            downhillcost: { increment: 10 },
+            uphillcutoff: { unit: '%', increment: 0.5, min: 0 },
+            downhillcutoff: { unit: '%', increment: 0.5, min: 0 },
+            turnInstructionCatchingRange: { unit: 'm', increment: 5, min: 0 },
+            correctMisplacedViaPointsDistance: { unit: 'm', increment: 50, min: 0 },
+        },
         parameterSection(name) {
             if (['totalMass', 'bikerPower'].indexOf(name) !== -1) return 'rider';
             if (['maxSpeed', 'S_C_x', 'C_r'].indexOf(name) !== -1) return 'bike';
@@ -37,6 +50,9 @@ BR.Profile = L.Evented.extend({
                 this._activateSecondaryTab();
             }, this)
         );
+        $('#profileEditorTabs a[href="#profile_params_container"]').on('hide.bs.tab', (evt) => {
+            if (!this._validateParams()) evt.preventDefault();
+        });
 
         L.DomUtil.get('save').onclick = L.bind(this._save, this);
         L.DomUtil.get('upload').onclick = L.bind(this._upload, this);
@@ -48,6 +64,7 @@ BR.Profile = L.Evented.extend({
             alert: true,
         });
         this.savedProfiles = [];
+        this._sectionOpen = {};
         this.activeSavedId = null;
         this._loadLibrary();
         this._renderLibrary();
@@ -234,6 +251,7 @@ BR.Profile = L.Evented.extend({
     },
 
     saveNamedProfile(rename) {
+        if (!rename && this._isParamsFormActive() && !this._validateParams()) return false;
         const input = L.DomUtil.get('saved-profile-name');
         const name = input.value.trim();
         const active = this.savedProfiles.find((item) => item.id === this.activeSavedId);
@@ -438,12 +456,31 @@ BR.Profile = L.Evented.extend({
             var re = new RegExp(
                 '(assign\\s*' +
                     name +
-                    '\\s*=?\\s*)([\\w.]*)(\\s*#\\s*%(.*)%\\s*(\\|\\s*(.*)\\s*\\|\\s*(.*)\\s*)?[\\r\\n])'
+                    '\\b\\s*=?\\s*)([^\\s#]+)(\\s*#\\s*%(.*)%\\s*(\\|\\s*(.*)\\s*\\|\\s*(.*)\\s*)?(?:[\\r\\n]|$))'
             );
             profileText = profileText.replace(re, function (match, p1, p2, p3) {
+                if (
+                    value !== '' &&
+                    Number.isFinite(Number(value)) &&
+                    Number.isFinite(Number(p2)) &&
+                    Number(value) === Number(p2)
+                )
+                    return match;
                 return p1 + value + p3;
             });
         });
+        const defaults = {};
+        let numericChanged = false;
+        document.querySelectorAll('#profile_params input[type="number"]').forEach((input) => {
+            if (input.dataset.profileDefault === undefined) return;
+            defaults[input.name] = Number(input.dataset.profileDefault);
+            numericChanged = numericChanged || Number(input.value) !== defaults[input.name];
+        });
+        // Comments travel with saved/exported profiles and are ignored by the routing engine.
+        if (numericChanged && Object.keys(defaults).length) {
+            profileText = profileText.replace(/^# brouter-web numeric defaults: .*\r?\n/gm, '');
+            profileText = '# brouter-web numeric defaults: ' + JSON.stringify(defaults) + '\n' + profileText;
+        }
         const ratings = BR.RidingPreferences.ratings(profileText);
         let changed = false;
         Object.keys(ratings).forEach((id) => {
@@ -474,6 +511,7 @@ BR.Profile = L.Evented.extend({
     },
 
     _save(evt) {
+        if (!this._validateParams()) return;
         var profileText = this._buildCustomProfile(this._getProfileText());
         var that = this;
         this.fire('update', {
@@ -530,6 +568,10 @@ BR.Profile = L.Evented.extend({
     },
 
     _buildParamsForm(profileText) {
+        document.querySelectorAll('#profile_params [data-profile-section]').forEach((section) => {
+            const details = section.querySelector('details');
+            if (details) this._sectionOpen[section.dataset.profileSection] = details.open;
+        });
         if (!profileText) {
             L.DomUtil.get('profile_params').textContent = '';
             return;
@@ -547,7 +589,7 @@ BR.Profile = L.Evented.extend({
             global = global[0].split('\n').slice(1);
 
             // Comment is mandatory
-            var assignRegex = /assign\s*(\w*)\s*=?\s*([\w\.]*)\s*#\s*%(.*)%\s*(\|\s*(.*)\s*\|\s*(.*)\s*)?$/;
+            var assignRegex = /assign\s*(\w*)\s*=?\s*([^\s#]+)\s*#\s*%(.*)%\s*(\|\s*(.*)\s*\|\s*(.*)\s*)?$/;
             global.forEach(function (item) {
                 var match = item.match(assignRegex);
                 var value;
@@ -557,7 +599,7 @@ BR.Profile = L.Evented.extend({
                     var description = match[5];
 
                     // Find out type
-                    var paramType = match[6];
+                    var paramType = match[6] || '';
                     var paramValues = {};
                     if (paramType.match(/\[.*\]/)) {
                         paramType
@@ -585,8 +627,8 @@ BR.Profile = L.Evented.extend({
                     if (paramType == 'boolean') {
                         value = value == 'true';
                     } else if (paramType == 'number') {
-                        value = Number.parseFloat(value);
-                        if (Number.isNaN(value)) {
+                        value = Number(value);
+                        if (!Number.isFinite(value)) {
                             return;
                         }
                     }
@@ -622,7 +664,17 @@ BR.Profile = L.Evented.extend({
             paramsSection.append(i18next.t('sidebar.profile.no_easy_configuration_warning'));
         }
 
-        Object.keys(params).forEach(function (param) {
+        let defaults = {};
+        const defaultsComment = profileText.match(/^# brouter-web numeric defaults: (.+)$/m);
+        if (defaultsComment) {
+            try {
+                const parsed = JSON.parse(defaultsComment[1]);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) defaults = parsed;
+            } catch (err) {
+                // Older or manually edited profiles can still use their current values.
+            }
+        }
+        Object.keys(params).forEach((param) => {
             if (ratedToggles.indexOf(param) !== -1) return;
             var div = document.createElement('div');
             var label = document.createElement('label');
@@ -658,16 +710,7 @@ BR.Profile = L.Evented.extend({
                 input.name = param;
                 label.htmlFor = input.id = 'customize-profile-' + param;
                 if (paramType == 'number') {
-                    input.type = 'number';
-                    input.step = 'any';
-                    input.setAttribute('aria-describedby', 'profile-help-' + param);
-                    input.value = params[param].value;
-                    input.className = 'form-control form-control-sm';
-
-                    label.append(paramName);
-                    div.appendChild(label);
-                    div.appendChild(input);
-                    div.className = 'form-group';
+                    this._buildNumberField(div, label, input, param, paramName, params[param].value, defaults[param]);
                 } else if (paramType == 'boolean') {
                     input.type = 'checkbox';
                     input.checked = params[param].value;
@@ -698,8 +741,159 @@ BR.Profile = L.Evented.extend({
             sections[BR.Profile.parameterSection(param)].appendChild(div);
         });
         Object.values(sections).forEach((section) => {
-            if (section.children.length === 1) section.remove();
+            if (section.children.length === 1) {
+                section.remove();
+                return;
+            }
+            const details = document.createElement('details');
+            details.className = 'profile-settings-details';
+            details.open = this._sectionOpen[section.dataset.profileSection] !== false;
+            const summary = document.createElement('summary');
+            summary.appendChild(section.firstElementChild);
+            const body = document.createElement('div');
+            body.className = 'profile-settings-body';
+            while (section.firstChild) body.appendChild(section.firstChild);
+            details.appendChild(summary);
+            details.appendChild(body);
+            section.appendChild(details);
         });
+    },
+
+    _buildNumberField(div, label, input, param, name, value, savedDefault) {
+        const settings = BR.Profile.numericSettings[param] || { increment: 1 };
+        const baseline = typeof savedDefault === 'number' && Number.isFinite(savedDefault) ? savedDefault : value;
+        const suffix = settings.unit ? ' (' + settings.unit + ')' : '';
+        const caption = suffix && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+        const helpId = 'profile-help-' + param;
+        const errorId = 'profile-error-' + param;
+        const defaultId = 'profile-default-' + param;
+        input.type = 'number';
+        input.step = 'any';
+        input.required = true;
+        if (settings.min !== undefined) input.min = settings.min;
+        input.value = value;
+        input.dataset.profileDefault = baseline;
+        input.className = 'form-control form-control-sm';
+        input.setAttribute('aria-describedby', [helpId, defaultId, errorId].join(' '));
+        label.textContent = caption;
+        div.className = 'form-group profile-number';
+        div.appendChild(label);
+        const controls = document.createElement('div');
+        controls.className = 'input-group input-group-sm profile-number-controls';
+        const adjust = (direction) => {
+            if (input.value === '' || !Number.isFinite(Number(input.value))) return;
+            let next = Number((Number(input.value) + direction * settings.increment).toPrecision(12));
+            if (settings.min !== undefined && next < settings.min) next = settings.min;
+            if (settings.positive && next <= 0) return;
+            input.value = next;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const makeStep = (direction) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = direction < 0 ? 'input-group-prepend' : 'input-group-append';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-outline-secondary profile-number-step';
+            button.textContent = direction < 0 ? '−' : '+';
+            button.setAttribute(
+                'aria-label',
+                i18next.t('sidebar.profile.number-' + (direction < 0 ? 'decrease' : 'increase'), {
+                    name: caption,
+                    amount: settings.increment,
+                    unit: settings.unit || '',
+                    interpolation: { escapeValue: false },
+                })
+            );
+            button.onclick = () => adjust(direction);
+            wrapper.appendChild(button);
+            return wrapper;
+        };
+        controls.appendChild(makeStep(-1));
+        controls.appendChild(input);
+        if (settings.unit) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'input-group-append';
+            const unit = document.createElement('span');
+            unit.className = 'input-group-text';
+            unit.id = 'profile-unit-' + param;
+            unit.textContent = settings.unit;
+            input.setAttribute('aria-describedby', input.getAttribute('aria-describedby') + ' ' + unit.id);
+            wrapper.appendChild(unit);
+            controls.appendChild(wrapper);
+        }
+        controls.appendChild(makeStep(1));
+        input.onkeydown = (evt) => {
+            if (evt.key !== 'ArrowUp' && evt.key !== 'ArrowDown') return;
+            evt.preventDefault();
+            adjust(evt.key === 'ArrowUp' ? 1 : -1);
+        };
+        div.appendChild(controls);
+        const error = document.createElement('p');
+        error.id = errorId;
+        error.className = 'profile-number-error text-danger';
+        error.setAttribute('aria-live', 'polite');
+        div.appendChild(error);
+        const defaults = document.createElement('div');
+        defaults.className = 'profile-number-default';
+        const hint = document.createElement('span');
+        hint.id = defaultId;
+        hint.textContent = i18next.t('sidebar.profile.number-starting-value', {
+            value: baseline,
+            unit: settings.unit || '',
+            interpolation: { escapeValue: false },
+        });
+        defaults.appendChild(hint);
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'btn btn-link btn-sm profile-number-reset';
+        reset.textContent = i18next.t('sidebar.profile.number-reset');
+        reset.setAttribute(
+            'aria-label',
+            i18next.t('sidebar.profile.number-reset-label', { name: caption, interpolation: { escapeValue: false } })
+        );
+        reset.disabled = Number(input.value) === baseline;
+        reset.onclick = () => {
+            input.value = baseline;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        };
+        input.oninput = () => {
+            reset.disabled = input.value !== '' && Number(input.value) === baseline;
+            this._validateNumber(input);
+        };
+        defaults.appendChild(reset);
+        div.appendChild(defaults);
+    },
+
+    _validateNumber(input) {
+        const settings = BR.Profile.numericSettings[input.name] || {};
+        const value = Number(input.value);
+        let message = '';
+        if (input.value.trim() === '' || input.validity.badInput || !Number.isFinite(value)) {
+            message = i18next.t('sidebar.profile.number-required');
+        } else if (settings.positive && value <= 0) {
+            message = i18next.t('sidebar.profile.number-positive');
+        } else if (settings.min !== undefined && value < settings.min) {
+            message = i18next.t('sidebar.profile.number-min', { min: settings.min });
+        }
+        const error = document.getElementById('profile-error-' + input.name);
+        if (error) error.textContent = message;
+        input.classList.toggle('is-invalid', !!message);
+        input.setAttribute('aria-invalid', message ? 'true' : 'false');
+        return !message;
+    },
+
+    _validateParams() {
+        let firstInvalid;
+        document.querySelectorAll('#profile_params input[type="number"]').forEach((input) => {
+            if (!this._validateNumber(input) && !firstInvalid) firstInvalid = input;
+        });
+        if (firstInvalid) {
+            const details = firstInvalid.closest('details');
+            if (details) details.open = true;
+            firstInvalid.focus();
+        }
+        return !firstInvalid;
     },
 
     _buildRidingPreferences(profileText, container, preferences) {
@@ -708,7 +902,7 @@ BR.Profile = L.Evented.extend({
         const section = document.createElement('section');
         section.className = 'riding-preferences';
         const title = document.createElement('h2');
-        title.className = 'h6 mt-2';
+        title.className = 'h6';
         title.textContent = i18next.t('sidebar.profile.riding-title');
         section.appendChild(title);
         const note = document.createElement('p');
