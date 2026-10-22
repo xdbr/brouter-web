@@ -15,8 +15,13 @@ class CodeMirrorMock {
     static fromTextArea() {
         return new CodeMirrorMock();
     }
+    on(event, callback) {
+        this.handlers = this.handlers || {};
+        this.handlers[event] = callback;
+    }
     setValue(value) {
         this.value = value;
+        if (this.handlers && this.handlers.change) this.handlers.change(this, { origin: 'setValue' });
     }
     getValue() {
         return this.value;
@@ -60,6 +65,7 @@ let profile;
 beforeEach(() => {
     document.body = indexHtml.body.cloneNode(true);
     localStorage.clear();
+    BR.conf = { profiles: ['trekking'], profilesUrl: '' };
     profile = new BR.Profile();
 });
 
@@ -206,5 +212,183 @@ describe('custom profile persistence', () => {
         profile.clear({ target: { blur() {} }, preventDefault() {} });
         expect(localStorage.getItem('routingprofile.customText')).toBeNull();
         expect(localStorage.getItem('routingprofile')).toBeNull();
+    });
+});
+
+describe('named profile library', () => {
+    const save = (name, text) => {
+        profile._setValue(text);
+        document.getElementById('saved-profile-name').value = name;
+        return profile.saveNamedProfile(false);
+    };
+    const library = () => JSON.parse(localStorage.getItem('routingprofile.library'));
+
+    beforeEach(() => {
+        profile.message.showError = jest.fn();
+        profile.message.showWarning = jest.fn();
+        profile.on('update', (evt) => {
+            profile.rememberCustomProfile(evt.profileText);
+            evt.callback(null, 'custom_test');
+        });
+    });
+
+    test('saves independent named copies and restores the last selected copy', () => {
+        expect(save('Gravel', 'assign gravel true')).toBe(true);
+        const gravelId = profile.activeSavedId;
+        expect(save('Forest', 'assign forest true')).toBe(true);
+        const forestId = profile.activeSavedId;
+        expect(library().profiles).toHaveLength(2);
+        expect(profile.selectSavedProfile(gravelId)).toBe(true);
+        expect(profile.editor.getValue()).toBe('assign gravel true');
+        expect(library().activeId).toBe(gravelId);
+        const restored = new BR.Profile();
+        restored.on('update', (evt) => evt.callback(null, 'custom_new'));
+        expect(restored.restoreCustomProfile()).toBe(true);
+        expect(restored.activeSavedId).toBe(gravelId);
+        expect(restored.editor.getValue()).toBe('assign gravel true');
+        expect(profile.selectSavedProfile(forestId)).toBe(true);
+        expect(profile.editor.getValue()).toBe('assign forest true');
+    });
+
+    test('applying edits updates only the selected saved profile', () => {
+        save('Gravel', 'assign gravel true');
+        const gravelId = profile.activeSavedId;
+        save('Forest', 'assign forest true');
+        profile.rememberCustomProfile('assign forest false');
+        expect(library().profiles.find((item) => item.id === gravelId).text).toBe('assign gravel true');
+        expect(library().profiles.find((item) => item.id === profile.activeSavedId).text).toBe('assign forest false');
+    });
+
+    test('renames a profile without changing its identity or saved text', () => {
+        save('Gravel', 'assign gravel true');
+        const id = profile.activeSavedId;
+        profile._setValue('unapplied edit');
+        document.getElementById('saved-profile-name').value = 'Quiet gravel';
+        expect(profile.saveNamedProfile(true)).toBe(true);
+        expect(library().profiles).toEqual([{ id, name: 'Quiet gravel', text: 'assign gravel true' }]);
+    });
+
+    test('rejects blank, duplicate, and empty profiles', () => {
+        expect(save('Gravel', 'assign gravel true')).toBe(true);
+        expect(save(' gravel ', 'other text')).toBe(false);
+        expect(save('  ', 'other text')).toBe(false);
+        expect(save('Empty', '   ')).toBe(false);
+        expect(library().profiles).toHaveLength(1);
+    });
+
+    test('migrates the previously saved custom text into a named profile', () => {
+        localStorage.setItem('routingprofile.customText', profileText);
+        const migrated = new BR.Profile();
+        expect(migrated.savedProfiles).toHaveLength(1);
+        expect(migrated.savedProfiles[0].text).toBe(profileText);
+        expect(library().activeId).toBe(migrated.savedProfiles[0].id);
+        expect(localStorage.getItem('routingprofile.customText')).toBe(profileText);
+    });
+
+    test('selecting a built-in profile detaches edits from the named copy', () => {
+        save('Gravel', 'assign gravel true');
+        BR.conf = { profilesUrl: '', profiles: ['trekking'] };
+        profile.update({ profile: 'trekking' });
+        profile.rememberCustomProfile('modified trekking');
+        expect(profile.activeSavedId).toBeNull();
+        expect(library().profiles[0].text).toBe('assign gravel true');
+    });
+
+    test('clearing the editor keeps named profiles available', () => {
+        save('Gravel', 'assign gravel true');
+        profile.clear({ target: { blur() {} }, preventDefault() {} });
+        expect(library().profiles).toHaveLength(1);
+        expect(profile.restoreCustomProfile()).toBe(false);
+    });
+
+    test('deleting a saved profile resets to the default profile', () => {
+        save('Gravel', 'assign gravel true');
+        const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+        try {
+            profile.deleteSavedProfile();
+            expect(library().profiles).toEqual([]);
+            expect(profile.activeSavedId).toBeNull();
+            expect(profile.editor.getValue()).toBe('');
+            expect(localStorage.getItem('routingprofile')).toBe('trekking');
+            expect(localStorage.getItem('routingprofile.customText')).toBeNull();
+            expect(document.getElementById('saved-profiles').value).toBe('__default__');
+        } finally {
+            confirm.mockRestore();
+        }
+    });
+
+    test('a failed write leaves the collection unchanged', () => {
+        save('Gravel', 'assign gravel true');
+        const before = library();
+        const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('full');
+        });
+        try {
+            expect(save('Forest', 'assign forest true')).toBe(false);
+            expect(profile.savedProfiles).toEqual(before.profiles);
+            expect(profile.message.showWarning).toHaveBeenCalled();
+        } finally {
+            write.mockRestore();
+        }
+    });
+
+    test('profile names are rendered as text', () => {
+        save('<img src=x onerror=alert(1)>', 'assign gravel true');
+        const select = document.getElementById('saved-profiles');
+        expect(select.querySelector('img')).toBeNull();
+        expect(select.options[2].textContent).toBe('<img src=x onerror=alert(1)>');
+    });
+});
+
+test('cancelling a profile switch keeps unapplied edits and the selected name', () => {
+    profile.message.showWarning = jest.fn();
+    profile._setValue('first profile');
+    document.getElementById('saved-profile-name').value = 'First';
+    profile.saveNamedProfile(false);
+    const first = profile.activeSavedId;
+    profile._setValue('second profile');
+    document.getElementById('saved-profile-name').value = 'Second';
+    profile.saveNamedProfile(false);
+    const second = profile.activeSavedId;
+    profile._setValue('unapplied edit');
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+        const select = document.getElementById('saved-profiles');
+        select.value = first;
+        select.dispatchEvent(new Event('change'));
+        expect(profile.activeSavedId).toBe(second);
+        expect(select.value).toBe(second);
+        expect(profile.editor.getValue()).toBe('unapplied edit');
+    } finally {
+        confirm.mockRestore();
+    }
+});
+
+describe('editing the default profile', () => {
+    beforeEach(() => {
+        profile.resetToDefault();
+        profile._setValue(profileText);
+    });
+
+    test.each(['input', 'change'])('a parameter %s event selects Unsaved Profile', (event) => {
+        document.getElementById('saved-profile-name').value = 'My draft';
+        const checkbox = document.getElementById('customize-profile-isOne');
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event(event, { bubbles: true }));
+        expect(document.getElementById('saved-profiles').value).toBe('');
+        expect(profile.defaultSelected).toBe(false);
+        expect(document.getElementById('saved-profile-name').value).toBe('My draft');
+        expect(localStorage.getItem('routingprofile')).toBe('trekking');
+    });
+
+    test('typing in the profile editor selects Unsaved Profile', () => {
+        profile.editor.handlers.change(profile.editor, { origin: '+input' });
+        expect(document.getElementById('saved-profiles').value).toBe('');
+        expect(profile.defaultSelected).toBe(false);
+    });
+
+    test('loading the original text keeps Default selected', () => {
+        expect(document.getElementById('saved-profiles').value).toBe('__default__');
+        expect(profile.defaultSelected).toBe(true);
     });
 });

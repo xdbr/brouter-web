@@ -66,8 +66,13 @@ BR.RoutingOptions = L.Evented.extend({
             alternative = $('#alternative option:selected');
         this.refreshUI();
 
+        const selected = profile[0];
+        const profileValue =
+            selected && selected.dataset.savedId
+                ? selected.dataset.serverProfile || this.getCustomProfile() || BR.conf.profiles[0]
+                : profile.val();
         return {
-            profile: profile.val(),
+            profile: profileValue,
             alternative: alternative.val(),
         };
     },
@@ -86,7 +91,44 @@ BR.RoutingOptions = L.Evented.extend({
         }
     },
 
-    setCustomProfile(profile, noUpdate) {
+    setSavedProfiles(profiles, activeId) {
+        const group = L.DomUtil.get('profile');
+        const selected = group.querySelector('option:checked');
+        const previousValue = selected && selected.value;
+        const serverProfiles = {};
+        group.querySelectorAll('option[data-saved-id]').forEach((option) => {
+            serverProfiles[option.dataset.savedId] = option.dataset.serverProfile;
+            option.remove();
+        });
+        profiles.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = 'saved-profile:' + item.id;
+            option.dataset.savedId = item.id;
+            if (serverProfiles[item.id]) option.dataset.serverProfile = serverProfiles[item.id];
+            option.textContent = item.name;
+            group.appendChild(option);
+        });
+        const value = activeId ? 'saved-profile:' + activeId : previousValue;
+        const target = Array.from(group.children).find((option) => option.value === value);
+        if (target) {
+            Array.from(group.children).forEach((option) => {
+                option.selected = option === target;
+            });
+        } else if (!group.querySelector('option:checked')) {
+            group.children[1].selected = true;
+        }
+        this.refreshUI();
+    },
+
+    restoreSelection(values) {
+        if (!Array.isArray(values)) return;
+        Array.from(L.DomUtil.get('profile-alternative').options).forEach((option) => {
+            option.selected = values.indexOf(option.value) !== -1;
+        });
+        this.refreshUI();
+    },
+
+    setCustomProfile(profile, noUpdate, savedId) {
         var profiles_grp, option;
 
         profiles_grp = L.DomUtil.get('profile');
@@ -106,10 +148,29 @@ BR.RoutingOptions = L.Evented.extend({
         }
 
         option.selected = !!profile;
+        if (profile && savedId) {
+            const saved = Array.from(profiles_grp.children).find((item) => item.dataset.savedId === savedId);
+            if (saved) {
+                option.selected = false;
+                saved.dataset.serverProfile = profile;
+                saved.selected = true;
+            }
+        }
 
         if (!noUpdate) {
             this.fire('update', { options: this.getOptions() });
         }
+    },
+
+    resetToDefault() {
+        this.setCustomProfile(null, true);
+        const select = L.DomUtil.get('profile-alternative');
+        Array.from(select.options).forEach((option) => {
+            option.selected =
+                option.parentElement.id === 'profile' ? option.value === BR.conf.profiles[0] : option.value === '0';
+        });
+        this.rememberProfile(BR.conf.profiles[0]);
+        this.fire('update', { options: this.getOptions() });
     },
 
     getCustomProfile() {
@@ -147,11 +208,15 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     _getChangeHandler() {
-        return L.bind(function (evt, clickedIndex) {
+        return L.bind(function (evt, clickedIndex, isSelected, previousValue) {
             // bootstrap-select also emits changes for programmatic startup/hash
             // updates, with no clicked index. Only persist an actual user choice.
             if (clickedIndex != null) {
                 const option = evt.target.options[clickedIndex];
+                if (option.dataset.savedId) {
+                    this.fire('saved-profile', { id: option.dataset.savedId, previousValue });
+                    return;
+                }
                 if (option.parentElement.id === 'profile') {
                     this.rememberProfile(option.value);
                 }

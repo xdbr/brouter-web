@@ -1,6 +1,7 @@
 BR.Profile = L.Evented.extend({
     cache: {},
     storageKey: 'routingprofile.customText',
+    libraryKey: 'routingprofile.library',
 
     initialize() {
         var textArea = L.DomUtil.get('profile_upload');
@@ -24,6 +25,38 @@ BR.Profile = L.Evented.extend({
         this.message = new BR.Message('profile_message', {
             alert: true,
         });
+        this.savedProfiles = [];
+        this.activeSavedId = null;
+        this._loadLibrary();
+        this._renderLibrary();
+        L.DomUtil.get('saved-profile-name').form.onsubmit = (evt) => evt.preventDefault();
+        L.DomUtil.get('saved-profiles').onchange = (evt) => {
+            const id = evt.target.value;
+            if (this._hasUnsavedChanges() && !window.confirm(i18next.t('sidebar.profile.discard'))) {
+                this._renderLibrary();
+                return;
+            }
+            if (id === '__default__') this.resetToDefault();
+            else if (id) this.selectSavedProfile(id);
+            else {
+                this.activeSavedId = null;
+                this._renderLibrary();
+            }
+        };
+        L.DomUtil.get('profile-save-as').onclick = () => this.saveNamedProfile(false);
+        L.DomUtil.get('profile-rename').onclick = () => this.saveNamedProfile(true);
+        L.DomUtil.get('profile-delete').onclick = () => this.deleteSavedProfile();
+        $('#profile_params').on('input change', 'input, select', () => this._markDefaultEdited());
+        this.editor.on('change', (editor, change) => {
+            if (change.origin !== 'setValue') this._markDefaultEdited();
+        });
+    },
+
+    _markDefaultEdited() {
+        if (!this.defaultSelected) return;
+        this.defaultSelected = false;
+        // Preserve the draft name and current controls while changing the label.
+        L.DomUtil.get('saved-profiles').value = '';
     },
 
     clear(evt) {
@@ -31,6 +64,8 @@ BR.Profile = L.Evented.extend({
 
         evt.preventDefault();
 
+        this.activeSavedId = null;
+        this._renderLibrary();
         this.editor.markClean();
         this._setValue('');
 
@@ -52,6 +87,11 @@ BR.Profile = L.Evented.extend({
             profileUrl,
             loading = false;
 
+        if (profileName && !profileName.startsWith('custom_')) {
+            this.activeSavedId = null;
+            this.defaultSelected = profileName === BR.conf.profiles[0];
+            this._renderLibrary();
+        }
         if (profileName && BR.conf.profilesUrl) {
             this.selectedProfileName = profileName;
 
@@ -84,12 +124,198 @@ BR.Profile = L.Evented.extend({
         if (cb && !loading) cb();
     },
 
-    rememberCustomProfile(profileText) {
+    _loadLibrary() {
         try {
+            const raw = localStorage.getItem(this.libraryKey);
+            if (raw) {
+                const library = JSON.parse(raw);
+                if (library.version !== 1 || !Array.isArray(library.profiles)) throw new Error('Invalid library');
+                const ids = new Set();
+                this.savedProfiles = library.profiles.filter((item) => {
+                    if (
+                        !item ||
+                        typeof item.id !== 'string' ||
+                        !item.id ||
+                        ids.has(item.id) ||
+                        typeof item.name !== 'string' ||
+                        !item.name.trim() ||
+                        typeof item.text !== 'string'
+                    )
+                        return false;
+                    ids.add(item.id);
+                    return true;
+                });
+                this.lastSavedId = library.activeId;
+            } else {
+                const text = localStorage.getItem(this.storageKey);
+                if (text) {
+                    this.savedProfiles = [{ id: 'migrated', name: i18next.t('sidebar.profile.migrated'), text }];
+                    this.lastSavedId = 'migrated';
+                    this._persistLibrary();
+                }
+            }
+        } catch (err) {
+            this.message.showWarning(i18next.t('sidebar.profile.storage-error'));
+        }
+    },
+
+    _persistLibrary() {
+        localStorage.setItem(
+            this.libraryKey,
+            JSON.stringify({
+                version: 1,
+                activeId: this.lastSavedId,
+                profiles: this.savedProfiles,
+            })
+        );
+    },
+
+    _renderLibrary() {
+        const select = L.DomUtil.get('saved-profiles');
+        select.textContent = '';
+        const draft = document.createElement('option');
+        draft.value = '';
+        draft.textContent = i18next.t('sidebar.profile.unsaved');
+        select.appendChild(draft);
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '__default__';
+        defaultOption.textContent = i18next.t('sidebar.profile.default');
+        select.appendChild(defaultOption);
+        this.savedProfiles.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = item.name;
+            select.appendChild(option);
+        });
+        select.value = this.activeSavedId || (this.defaultSelected ? '__default__' : '');
+        const active = this.savedProfiles.find((item) => item.id === this.activeSavedId);
+        L.DomUtil.get('saved-profile-name').value = active ? active.name : '';
+        L.DomUtil.get('profile-rename').disabled = !active;
+        L.DomUtil.get('profile-delete').disabled = !active;
+        this.fire('name', {
+            name: active ? active.name : null,
+            profiles: this.savedProfiles,
+            activeId: this.activeSavedId,
+        });
+    },
+
+    _currentText() {
+        const text = this._getProfileText();
+        return this._isParamsFormActive() ? this._buildCustomProfile(text) : text;
+    },
+
+    _hasUnsavedChanges() {
+        const active = this.savedProfiles.find((item) => item.id === this.activeSavedId);
+        return active
+            ? this._currentText() !== active.text
+            : !this.editor.isClean() || this._currentText() !== this._getProfileText();
+    },
+
+    saveNamedProfile(rename) {
+        const input = L.DomUtil.get('saved-profile-name');
+        const name = input.value.trim();
+        const active = this.savedProfiles.find((item) => item.id === this.activeSavedId);
+        if (
+            !name ||
+            name.length > 100 ||
+            this.savedProfiles.some(
+                (item) => item.name.toLowerCase() === name.toLowerCase() && (!rename || item.id !== this.activeSavedId)
+            )
+        ) {
+            this.message.showError(i18next.t('sidebar.profile.unique-name'));
+            return false;
+        }
+        if (rename && !active) return false;
+        const text = rename ? active.text : this._currentText();
+        if (!text.trim()) {
+            this.message.showError(i18next.t('sidebar.profile.empty'));
+            return false;
+        }
+        const previous = this.savedProfiles;
+        const previousId = this.lastSavedId;
+        const item = rename
+            ? { ...active, name }
+            : { id: 'saved_' + Date.now() + '_' + Math.random().toString(36).slice(2), name, text };
+        this.savedProfiles = rename
+            ? previous.map((entry) => (entry.id === item.id ? item : entry))
+            : previous.concat(item);
+        this.lastSavedId = item.id;
+        try {
+            this._persistLibrary();
+        } catch (err) {
+            this.savedProfiles = previous;
+            this.lastSavedId = previousId;
+            this.message.showWarning(i18next.t('sidebar.profile.storage-error'));
+            return false;
+        }
+        this.activeSavedId = item.id;
+        this._renderLibrary();
+        if (!rename) this._applySavedText(text);
+        return true;
+    },
+
+    selectSavedProfile(id) {
+        const item = this.savedProfiles.find((entry) => entry.id === id);
+        if (!item) return false;
+        this.activeSavedId = id;
+        this.lastSavedId = id;
+        this._renderLibrary();
+        this._applySavedText(item.text);
+        return true;
+    },
+
+    deleteSavedProfile() {
+        const id = this.activeSavedId;
+        if (!id || !window.confirm(i18next.t('sidebar.profile.confirm-delete'))) return;
+        const previous = this.savedProfiles;
+        const previousId = this.lastSavedId;
+        this.savedProfiles = previous.filter((item) => item.id !== id);
+        if (this.lastSavedId === id) this.lastSavedId = null;
+        try {
+            this._persistLibrary();
+        } catch (err) {
+            this.savedProfiles = previous;
+            this.lastSavedId = previousId;
+            this.message.showWarning(i18next.t('sidebar.profile.storage-error'));
+            return;
+        }
+        this.resetToDefault();
+    },
+
+    resetToDefault() {
+        this.activeSavedId = null;
+        this.defaultSelected = true;
+        this.profileName = null;
+        this.selectedProfileName = BR.conf.profiles[0];
+        L.DomUtil.get('profile_params').textContent = '';
+        this.editor.markClean();
+        this._setValue('');
+        this._renderLibrary();
+        try {
+            localStorage.removeItem(this.storageKey);
+            localStorage.setItem('routingprofile', BR.conf.profiles[0]);
+        } catch (err) {
+            this.message.showWarning(i18next.t('sidebar.profile.storage-error'));
+        }
+        this.fire('default');
+    },
+
+    rememberCustomProfile(profileText) {
+        const previous = this.savedProfiles;
+        const previousId = this.lastSavedId;
+        try {
+            const active = this.savedProfiles.find((item) => item.id === this.activeSavedId);
+            this.savedProfiles = previous.map((item) =>
+                item.id === this.activeSavedId ? { ...item, text: profileText } : item
+            );
+            this.lastSavedId = active ? active.id : null;
+            this._persistLibrary();
             localStorage.setItem(this.storageKey, profileText);
             localStorage.setItem('routingprofile', 'Custom');
         } catch (err) {
-            this.message.showWarning(i18next.t('warning.temporary-profile'));
+            this.savedProfiles = previous;
+            this.lastSavedId = previousId;
+            this.message.showWarning(i18next.t('sidebar.profile.storage-error'));
         }
     },
 
@@ -97,15 +323,23 @@ BR.Profile = L.Evented.extend({
         let profileText;
         try {
             if (localStorage.getItem('routingprofile') !== 'Custom') return false;
+            const active = this.savedProfiles.find((item) => item.id === this.lastSavedId);
+            if (active) return this.selectSavedProfile(active.id);
             profileText = localStorage.getItem(this.storageKey);
         } catch (err) {
             return false;
         }
         if (!profileText) return false;
+        this._applySavedText(profileText);
+        return true;
+    },
 
+    _applySavedText(profileText) {
+        this.defaultSelected = false;
         this.profileName = 'Custom';
         this.selectedProfileName = 'Custom';
         this._setValue(profileText);
+        this.editor.markClean();
         this.fire('update', {
             profileText,
             restoring: true,
@@ -117,7 +351,6 @@ BR.Profile = L.Evented.extend({
                 }
             },
         });
-        return true;
     },
 
     show() {

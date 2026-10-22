@@ -263,29 +263,44 @@
         elevation = new BR.Heightgraph();
 
         profile = new BR.Profile();
+        let profileUploadVersion = 0;
+        profile.on('name', function (evt) {
+            routingOptions.setSavedProfiles(evt.profiles, evt.activeId);
+        });
+        routingOptions.setSavedProfiles(profile.savedProfiles, profile.activeSavedId);
+        routingOptions.on('saved-profile', function (evt) {
+            if (profile._hasUnsavedChanges() && !window.confirm(i18next.t('sidebar.profile.discard'))) {
+                routingOptions.restoreSelection(evt.previousValue);
+                return;
+            }
+            profile.selectSavedProfile(evt.id);
+        });
         profile.on('update', function (evt) {
             BR.message.hide();
-            var profileId = routingOptions.getCustomProfile();
+            const uploadVersion = ++profileUploadVersion;
+            var profileId = evt.restoring ? null : routingOptions.getCustomProfile();
             const selectedProfile = routingOptions.getOptions().profile;
             // Keep the source even if uploading fails or the temporary server copy expires.
             profile.rememberCustomProfile(evt.profileText);
             router.uploadProfile(profileId, evt.profileText, function (err, profileId) {
                 if (
-                    evt.restoring &&
-                    (routingOptions.getOptions().profile !== selectedProfile ||
-                        profile.editor.getValue() !== evt.profileText)
+                    uploadVersion !== profileUploadVersion ||
+                    (evt.restoring &&
+                        (routingOptions.getOptions().profile !== selectedProfile ||
+                            profile.editor.getValue() !== evt.profileText))
                 ) {
                     return;
                 }
                 if (!err) {
-                    routingOptions.setCustomProfile(profileId, true);
+                    routingOptions.setCustomProfile(profileId, true, profile.activeSavedId);
                     updateRoute({
                         options: routingOptions.getOptions(),
                     });
+                    urlHash.onMapMove();
                 } else {
                     profile.message.showError(err);
                     if (profileId) {
-                        routingOptions.setCustomProfile(profileId, true);
+                        routingOptions.setCustomProfile(profileId, true, profile.activeSavedId);
                         router.setOptions(routingOptions.getOptions());
                     }
                 }
@@ -295,7 +310,12 @@
                 }
             });
         });
+        profile.on('default', function () {
+            profileUploadVersion++;
+            routingOptions.resetToDefault();
+        });
         profile.on('clear', function (evt) {
+            profileUploadVersion++;
             profile.message.hide();
             routingOptions.setCustomProfile(null);
             routingOptions.rememberProfile(routingOptions.getOptions().profile);

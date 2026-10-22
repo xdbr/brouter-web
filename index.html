@@ -1373,6 +1373,49 @@
                                 ><span data-i18n="sidebar.customize-profile.title">Customize profile</span>
                             </h1>
                             <form class="flexcolumn flexgrow">
+                                <div class="form-group">
+                                    <label for="saved-profiles" data-i18n="sidebar.profile.saved">Saved profiles</label>
+                                    <select id="saved-profiles" class="form-control form-control-sm"></select>
+                                    <label for="saved-profile-name" data-i18n="sidebar.profile.name"
+                                        >Profile name</label
+                                    >
+                                    <input
+                                        id="saved-profile-name"
+                                        class="form-control form-control-sm"
+                                        maxlength="100"
+                                    />
+                                    <div class="pt-1">
+                                        <button
+                                            id="profile-save-as"
+                                            type="button"
+                                            class="btn btn-primary btn-sm"
+                                            data-i18n="sidebar.profile.save-as"
+                                        >
+                                            Save as new
+                                        </button>
+                                        <button
+                                            id="profile-rename"
+                                            type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            data-i18n="sidebar.profile.rename"
+                                        >
+                                            Rename
+                                        </button>
+                                        <button
+                                            id="profile-delete"
+                                            type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            data-i18n="sidebar.profile.delete"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <small data-i18n="sidebar.profile.saved-help"
+                                        >Apply updates the selected saved profile. Save as new creates a separate
+                                        copy.</small
+                                    >
+                                </div>
+                                <div id="profile_message"></div>
                                 <ul class="nav nav-tabs" id="profileEditorTabs" role="tablist">
                                     <li class="nav-item">
                                         <a
@@ -1431,7 +1474,6 @@
                                             data-i18n="[placeholder]sidebar.profile.placeholder"
                                             placeholder="Write your custom profile here."
                                         ></textarea>
-                                        <div id="profile_message"></div>
                                         <div class="form-group pt-1">
                                             <button id="upload" type="button" class="btn btn-primary btn-sm">
                                                 <span class="fa fa-cloud-upload"></span>
