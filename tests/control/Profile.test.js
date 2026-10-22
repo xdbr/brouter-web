@@ -672,3 +672,31 @@ assign costfactor 1
         }
     );
 });
+
+test('navigation format help explains the current selection without changing its stored value', () => {
+    i18next.init({
+        lng: 'en',
+        initImmediate: false,
+        resources: { en: { translation: require('../../locales/en.json') } },
+    });
+    profile._setValue(`---context:global
+assign turnInstructionMode = 1 # %turnInstructionMode% | Navigation | [0=none, 1=auto, 2=locus, 3=osmand, 4=comments, 5=gpsies, 6=orux, 7=locus-old, 9=custom]
+`);
+    const select = document.querySelector('select[name="turnInstructionMode"]');
+    const help = document.getElementById('profile-option-help-turnInstructionMode');
+    expect(help.textContent).toContain('does not include turn instructions with Automatic');
+    expect(select.getAttribute('aria-describedby')).toContain(help.id);
+    for (const value of ['0', '2', '3', '4', '5', '6', '7']) {
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(help.hidden).toBe(false);
+        expect(help.textContent).toBe(i18next.t('profileParameterOptionDescriptions.turnInstructionMode.' + value));
+        expect(profile._currentText()).toContain('assign turnInstructionMode = ' + value);
+    }
+    select.value = '9';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(help.hidden).toBe(true);
+    expect(help.textContent).toBe('');
+    expect(select.selectedOptions[0].textContent).toBe('custom');
+    expect(profile._currentText()).toContain('assign turnInstructionMode = 9');
+});

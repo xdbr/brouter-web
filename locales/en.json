@@ -301,6 +301,18 @@
       "7": "Locus Map (legacy)"
     }
   },
+  "profileParameterOptionDescriptions": {
+    "turnInstructionMode": {
+      "0": "Generate a route without turn-by-turn instructions. Your navigation app may still create its own directions from the track.",
+      "1": "Let the calling app or service choose the instruction mode. This web app's standard GPX download does not include turn instructions with Automatic. Choose an explicit app format below if you need them.",
+      "2": "Add turn waypoints that Locus Map can read from the GPX file. In this web app, Locus Map and Locus Map (legacy) currently export the same instruction format.",
+      "3": "Add route points with turn commands and timing information in OsmAnd's GPX format. Choose this when importing the route into OsmAnd.",
+      "4": "Write turn commands into comments inside the GPX file. Useful for inspecting the file or for software that explicitly reads BRouter comments; ordinary navigation apps may ignore them.",
+      "5": "Add GPSies-style waypoints with instruction names and turn symbols. Choose this only if your importing app expects that format.",
+      "6": "Add turn waypoints using OruxMaps-specific GPX information. Choose this when importing the route into OruxMaps.",
+      "7": "Add turn waypoints using the older Locus Map GPX format. In this web app, this currently produces the same instructions as Locus Map."
+    }
+  },
   "profileParameters": {
     "maxSpeed": {
       "name": "Maximum speed (km/h)",
@@ -340,7 +352,7 @@
     },
     "turnInstructionMode": {
       "name": "Navigation instruction format",
-      "description": "Choose how turn-by-turn directions are included in an exported route. Automatic uses the format chosen by the routing engine."
+      "description": "Choose how directions such as 'turn left' are stored in a GPX download. Match the format to the navigation app you will use. This changes the instruction data, not which roads or paths are chosen. After changing it, click Apply before downloading the route. FIT downloads use their own instruction format."
     },
     "turnInstructionCatchingRange": {
       "name": "Turn instruction range (m)",

@@ -738,6 +738,27 @@ BR.Profile = L.Evented.extend({
             helpBlock.className = 'help-block';
 
             div.appendChild(helpBlock);
+            if (paramType === 'select') {
+                const descriptionKey = 'profileParameterOptionDescriptions.' + param + '.';
+                if (
+                    Object.keys(params[param].possible_values).some((value) => i18next.exists(descriptionKey + value))
+                ) {
+                    const selectInput = div.querySelector('select');
+                    const selectedHelp = document.createElement('p');
+                    selectedHelp.className = 'help-block profile-option-help';
+                    selectedHelp.id = 'profile-option-help-' + param;
+                    selectedHelp.setAttribute('aria-live', 'polite');
+                    selectInput.setAttribute('aria-describedby', helpBlock.id + ' ' + selectedHelp.id);
+                    const updateHelp = () => {
+                        const key = descriptionKey + selectInput.value;
+                        selectedHelp.textContent = i18next.exists(key) ? i18next.t(key) : '';
+                        selectedHelp.hidden = !selectedHelp.textContent;
+                    };
+                    selectInput.addEventListener('change', updateHelp);
+                    updateHelp();
+                    div.appendChild(selectedHelp);
+                }
+            }
             sections[BR.Profile.parameterSection(param)].appendChild(div);
         });
         Object.values(sections).forEach((section) => {
