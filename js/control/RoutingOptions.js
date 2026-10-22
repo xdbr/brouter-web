@@ -17,6 +17,7 @@ BR.RoutingOptions = L.Evented.extend({
         for (var i = 0; i < profiles.length; i++) {
             var option = document.createElement('option');
             option.value = profiles[i];
+            option.dataset.builtin = 'true';
             option.text = i18next.t('navbar.profile.' + profiles[i]);
             // set remembered profile, only when no URL hash (assumes fullHash plugin not initialised yet)
             if (!location.hash && remembered_profile !== null && remembered_profile === profiles[i]) {
@@ -27,6 +28,7 @@ BR.RoutingOptions = L.Evented.extend({
         }
         // set default value, used as indicator for empty custom profile
         profiles_list.children[0].value = 'Custom';
+        profiles_list.children[0].id = 'custom-routing-profile';
         if (!remembered_profile_was_selected) {
             // <custom> profile is empty at start, select next one
             profiles_list.children[1].selected = true;
@@ -50,10 +52,11 @@ BR.RoutingOptions = L.Evented.extend({
             });
 
         // disable custom option if it has no value yet (default value is "Custom")
-        var custom = L.DomUtil.get('profile').children[0];
+        var custom = L.DomUtil.get('custom-routing-profile');
         if (custom.value === 'Custom') {
             custom.disabled = true;
         }
+        $('#profile option[data-profile-heading]').prop('disabled', true);
         $('.selectpicker').selectpicker('refresh');
 
         // append shortcut text to tooltip
@@ -96,6 +99,9 @@ BR.RoutingOptions = L.Evented.extend({
         const selected = group.querySelector('option:checked');
         const previousValue = selected && selected.value;
         const serverProfiles = {};
+        group
+            .querySelectorAll('option[data-profile-heading], option[data-divider]')
+            .forEach((option) => option.remove());
         group.querySelectorAll('option[data-saved-id]').forEach((option) => {
             serverProfiles[option.dataset.savedId] = option.dataset.serverProfile;
             option.remove();
@@ -106,8 +112,26 @@ BR.RoutingOptions = L.Evented.extend({
             option.dataset.savedId = item.id;
             if (serverProfiles[item.id]) option.dataset.serverProfile = serverProfiles[item.id];
             option.textContent = item.name;
-            group.appendChild(option);
+            group.insertBefore(option, group.querySelector('option[data-builtin]'));
         });
+        const heading = (key) => {
+            const option = document.createElement('option');
+            option.dataset.profileHeading = 'true';
+            option.value = 'heading:' + key;
+            const label = document.createElement('small');
+            label.className = 'text-muted';
+            label.textContent = i18next.t('navbar.' + key);
+            option.textContent = label.textContent;
+            option.dataset.content = label.outerHTML;
+            option.disabled = true;
+            return option;
+        };
+        group.insertBefore(heading('custom-profiles'), group.firstChild);
+        const builtin = group.querySelector('option[data-builtin]');
+        const divider = document.createElement('option');
+        divider.dataset.divider = 'true';
+        group.insertBefore(divider, builtin);
+        group.insertBefore(heading('builtin-profiles'), builtin);
         const value = activeId ? 'saved-profile:' + activeId : previousValue;
         const target = Array.from(group.children).find((option) => option.value === value);
         if (target) {
@@ -115,7 +139,7 @@ BR.RoutingOptions = L.Evented.extend({
                 option.selected = option === target;
             });
         } else if (!group.querySelector('option:checked')) {
-            group.children[1].selected = true;
+            group.querySelector('option[data-builtin]').selected = true;
         }
         this.refreshUI();
     },
@@ -132,7 +156,7 @@ BR.RoutingOptions = L.Evented.extend({
         var profiles_grp, option;
 
         profiles_grp = L.DomUtil.get('profile');
-        option = profiles_grp.children[0];
+        option = L.DomUtil.get('custom-routing-profile');
         option.value = profile || 'Custom';
         option.disabled = !profile;
 
@@ -144,7 +168,7 @@ BR.RoutingOptions = L.Evented.extend({
                 });
         } else if (option.selected) {
             // clear, select next in group when custom deselected
-            profiles_grp.children[1].selected = true;
+            profiles_grp.querySelector('option[data-builtin]').selected = true;
         }
 
         option.selected = !!profile;
@@ -174,8 +198,7 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     getCustomProfile() {
-        var profiles_grp = L.DomUtil.get('profile'),
-            option = profiles_grp.children[0],
+        var option = L.DomUtil.get('custom-routing-profile'),
             profile = null;
 
         if (option.value !== 'Custom') {
