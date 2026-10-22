@@ -6,6 +6,7 @@ BR = {};
 $ = require('jquery');
 i18next = require('i18next');
 require('leaflet');
+require('../../js/util/RidingPreferences.js');
 require('../../js/control/Profile.js');
 require('../../js/format/Gpx.js');
 
@@ -390,5 +391,120 @@ describe('editing the default profile', () => {
     test('loading the original text keeps Default selected', () => {
         expect(document.getElementById('saved-profiles').value).toBe('__default__');
         expect(profile.defaultSelected).toBe(true);
+    });
+});
+
+describe('rider preference controls', () => {
+    const gravel = require('../util/data/ridingProfile.js');
+
+    test('shows five-step choices instead of duplicate preference checkboxes', () => {
+        profile._setValue(gravel);
+        expect(document.querySelectorAll('.riding-preference')).toHaveLength(4);
+        expect(document.querySelectorAll('input[name="rider_pref_forest"]')).toHaveLength(5);
+        expect(document.querySelector('input[name="prefer_forests"]')).toBeNull();
+        expect(document.querySelector('[data-profile-section="rider"] input[name="bikerPower"]')).not.toBeNull();
+    });
+
+    test('unchanged ratings do not rewrite a profile or mark it as edited', () => {
+        profile._setValue(gravel);
+        expect(profile._currentText()).toBe(gravel);
+    });
+
+    test('rating changes mark defaults as edited and generate weighted rules', () => {
+        profile.resetToDefault();
+        profile._setValue(gravel);
+        const radio = document.querySelector('input[name="rider_pref_forest"][value="4"]');
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(profile.defaultSelected).toBe(false);
+        expect(radio.closest('label').classList.contains('active')).toBe(true);
+        const generated = profile._currentText();
+        expect(BR.RidingPreferences.ratings(generated).forest).toBe(4);
+        expect(generated).toContain('assign rider_forest_strength = 0.75');
+    });
+
+    test('ratings survive named saving and restoring, including full-editor round trips', () => {
+        profile._setValue(gravel);
+        document.querySelector('input[name="rider_pref_quiet"][value="3"]').checked = true;
+        document.getElementById('saved-profile-name').value = 'Quiet gravel';
+        profile.on('update', (evt) => {
+            profile.rememberCustomProfile(evt.profileText);
+            evt.callback(null, 'custom_rating');
+        });
+        profile.saveNamedProfile(false);
+        const restored = new BR.Profile();
+        restored.on('update', (evt) => evt.callback(null, 'custom_restored'));
+        expect(restored.restoreCustomProfile()).toBe(true);
+        expect(document.querySelector('input[name="rider_pref_quiet"]:checked').value).toBe('3');
+        toggleSecondaryTab();
+        expect(BR.RidingPreferences.ratings(profile.editor.getValue()).quiet).toBe(3);
+    });
+});
+
+test('profile settings stay visible in sections when the form is rebuilt', () => {
+    const gravel = require('../util/data/ridingProfile.js');
+    const extra = `
+assign totalMass = 90 # %totalMass% | Total weight | number
+assign C_r = 0.005 # %C_r% | Rolling resistance | number
+assign uphillcost = 80 # %uphillcost% | Climb cost | number
+assign turnInstructionMode = 1 # %turnInstructionMode% | Navigation | [0=none, 1=auto]
+assign processUnusedTags = false # %processUnusedTags% | Debug | boolean
+assign allow_ferries = true # %allow_ferries% | Ferries | boolean
+assign custom_value = 7 # %custom_value% | Custom | number
+`;
+    profile._setValue(gravel.replace('---context:way', extra + '\n---context:way'));
+    document.querySelector('input[name="bikerPower"]').value = '175';
+    profile._setValue(profile._currentText());
+    expect(document.querySelector('#profile_params details')).toBeNull();
+    const contains = (section, name) => document.querySelector(`[data-profile-section="${section}"] [name="${name}"]`);
+    expect(contains('rider', 'bikerPower').value).toBe('175');
+    expect(contains('rider', 'totalMass')).not.toBeNull();
+    expect(contains('bike', 'C_r')).not.toBeNull();
+    expect(contains('elevation', 'uphillcost')).not.toBeNull();
+    expect(contains('navigation', 'turnInstructionMode')).not.toBeNull();
+    expect(contains('advanced', 'processUnusedTags')).not.toBeNull();
+    expect(contains('preferences', 'allow_ferries')).not.toBeNull();
+    expect(contains('other', 'custom_value')).not.toBeNull();
+    expect(document.querySelectorAll('[data-profile-section="rider"]')).toHaveLength(1);
+});
+
+describe('plain-language boolean switches', () => {
+    const switchProfile = `
+---context:global
+assign validForBikes = true
+assign allow_ferries = true # %allow_ferries% | Allow ferries | boolean
+assign assume_wet_conditions = false # %assume_wet_conditions% | Wet | boolean
+---context:way
+assign costfactor 1
+`;
+
+    beforeEach(() => {
+        i18next.init({
+            lng: 'en',
+            initImmediate: false,
+            resources: { en: { translation: require('../../locales/en.json') } },
+        });
+        profile._setValue(switchProfile);
+    });
+
+    test('renders labeled switches with associated plain-language descriptions', () => {
+        const input = document.querySelector('input[name="assume_wet_conditions"]');
+        expect(input.getAttribute('role')).toBe('switch');
+        expect(input.closest('.custom-switch')).not.toBeNull();
+        expect(input.labels[0].textContent).toBe('Plan for wet conditions');
+        expect(document.getElementById(input.getAttribute('aria-describedby')).textContent).toContain('muddy');
+        expect(input.id).toBe('customize-profile-assume_wet_conditions');
+        expect(input.checked).toBe(false);
+    });
+
+    test('clicking a switch label still serializes the original boolean variable', () => {
+        const input = document.querySelector('input[name="allow_ferries"]');
+        profile.defaultSelected = true;
+        input.labels[0].click();
+        expect(input.checked).toBe(false);
+        expect(profile.defaultSelected).toBe(false);
+        expect(profile._currentText()).toContain('assign allow_ferries = false');
+        expect(profile._getFormValues().allow_ferries).toBe(false);
+        expect(profile._getFormValues()).not.toHaveProperty('Allow ferries');
     });
 });

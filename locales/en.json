@@ -243,6 +243,7 @@
       "car-test": "Car (test)",
       "custom": "Custom",
       "fastbike": "Fastbike",
+      "gravel": "Gravel bike",
       "fastbike-asia-pacific": "Fastbike (Asia Pacific)",
       "fastbike-lowtraffic": "Fastbike (low traffic)",
       "hiking-mountain": "Hiking",
@@ -287,6 +288,116 @@
     "tooltip-facebook": "Share on Facebook",
     "tooltip-mastodon": "Share on Mastodon",
     "tooltip-whatsapp": "Share on WhatsApp"
+  },
+  "profileParameters": {
+    "allow_steps": {
+      "name": "Allow stairs",
+      "description": "Include routes with stairs, where you may need to carry or push your bike. Turn off to exclude stairs."
+    },
+    "allow_ferries": {
+      "name": "Allow ferries",
+      "description": "Include ferry crossings when they offer a useful connection. Turn off to exclude ferries."
+    },
+    "ignore_cycleroutes": {
+      "name": "Ignore signed cycle routes",
+      "description": "Choose roads and paths by their other qualities, without favoring signed cycle routes."
+    },
+    "stick_to_cycleroutes": {
+      "name": "Stay on signed cycle routes",
+      "description": "Give signed cycle routes a stronger preference, even when this makes the ride longer."
+    },
+    "use_proposed_cycleroutes": {
+      "name": "Include planned cycle routes",
+      "description": "Treat planned cycle routes like existing ones. They may not yet be built or signposted."
+    },
+    "avoid_unsafe": {
+      "name": "Prefer roads with cycling provision",
+      "description": "Discourage roads without a cycleway, cycle-route designation, or other cycling access information."
+    },
+    "add_beeline": {
+      "name": "Connect distant start and end points",
+      "description": "Draw a straight line between a distant start or destination and the nearest routing connection. This line is not a calculated road or path."
+    },
+    "consider_traffic": {
+      "name": "Avoid heavier traffic",
+      "description": "Favor roads with lower estimated traffic. These estimates do not reflect live traffic conditions."
+    },
+    "consider_traffic_estimate": {
+      "name": "Avoid heavier traffic",
+      "description": "Favor roads with lower estimated traffic. These estimates do not reflect live traffic conditions."
+    },
+    "assume_wet_conditions": {
+      "name": "Plan for wet conditions",
+      "description": "Give muddy, rough, and slippery surfaces a larger penalty when choosing your route."
+    },
+    "avoid_steep_inclines": {
+      "name": "Avoid steep slopes",
+      "description": "Discourage steep climbs and descents, even if a gentler route is longer."
+    },
+    "prefer_cycle_routes": {
+      "name": "Prefer signed cycle routes",
+      "description": "Favor roads and paths that belong to a signed cycling route."
+    },
+    "consider_elevation": {
+      "name": "Prefer fewer climbs",
+      "description": "Consider climbing and descending when choosing a route. The exact effect depends on the profile and elevation settings."
+    },
+    "avoid_towns": {
+      "name": "Prefer routes outside towns",
+      "description": "Discourage built-up areas and favor routes through the countryside."
+    },
+    "consider_town": {
+      "name": "Prefer routes outside towns",
+      "description": "Discourage built-up areas and favor routes through the countryside."
+    },
+    "prefer_unpaved_paths": {
+      "name": "Prefer unpaved paths",
+      "description": "Favor gravel and suitable tracks over paved roads. Rough or difficult surfaces can still be discouraged."
+    },
+    "prefer_forests": {
+      "name": "Prefer forests",
+      "description": "Favor routes through wooded surroundings when the routing data includes this information."
+    },
+    "consider_forest": {
+      "name": "Prefer forests and parks",
+      "description": "Favor wooded areas and parks when the routing data includes this information."
+    },
+    "prefer_rivers": {
+      "name": "Prefer routes near water",
+      "description": "Favor river valleys and waterside surroundings when the routing data includes this information."
+    },
+    "consider_river": {
+      "name": "Prefer routes near water",
+      "description": "Favor routes near rivers and lakes when the routing data includes this information."
+    },
+    "avoid_noise": {
+      "name": "Prefer quiet surroundings",
+      "description": "Discourage areas with higher estimated noise. This is not a live noise measurement."
+    },
+    "consider_noise": {
+      "name": "Prefer quiet surroundings",
+      "description": "Discourage areas with higher estimated noise. This is not a live noise measurement."
+    },
+    "turnInstructionRoundabouts": {
+      "name": "Give roundabout directions",
+      "description": "Include instructions for navigating roundabouts in the exported route."
+    },
+    "considerTurnRestrictions": {
+      "name": "Respect mapped turn restrictions",
+      "description": "Take mapped restrictions on turning at junctions into account."
+    },
+    "correctMisplacedViaPoints": {
+      "name": "Trim detours to misplaced waypoints",
+      "description": "Remove short trips out and back when a waypoint sits just off the route. Use the distance setting to control how much can be trimmed."
+    },
+    "continueStraight": {
+      "name": "Continue ahead after waypoints",
+      "description": "Favor continuing ahead after a waypoint rather than immediately turning back."
+    },
+    "processUnusedTags": {
+      "name": "Include extra map details",
+      "description": "Show additional road and path attributes in the route data table. Useful when investigating why a route was chosen."
+    }
   },
   "sidebar": {
     "analysis": {
@@ -408,6 +519,28 @@
     },
     "profile": {
       "apply": "Apply",
+      "section-preferences": "Preferences",
+      "section-rider": "Rider information",
+      "section-bike": "Bike setup",
+      "section-elevation": "Elevation",
+      "section-navigation": "Navigation",
+      "section-advanced": "Advanced settings",
+      "section-other": "Other settings",
+      "riding-title": "Preferences",
+      "riding-help": "Choose how much each preference matters. Stronger preferences can mean longer detours. Apply to recalculate your route.",
+      "riding-unpaved": "Unpaved paths",
+      "riding-unpaved-help": "Favor gravel and suitable tracks.",
+      "riding-forest": "Forests",
+      "riding-forest-help": "Favor routes through wooded surroundings.",
+      "riding-water": "Rivers & lakes",
+      "riding-water-help": "Favor routes near water.",
+      "riding-quiet": "Quiet surroundings",
+      "riding-quiet-help": "Favor routes away from noise.",
+      "rating-1": "No preference",
+      "rating-2": "Slightly prefer",
+      "rating-3": "Moderately prefer",
+      "rating-4": "Prefer",
+      "rating-5": "Strongly prefer",
       "default": "Default",
       "saved": "Saved profiles",
       "name": "Profile name",

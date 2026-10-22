@@ -1,4 +1,26 @@
 BR.Profile = L.Evented.extend({
+    statics: {
+        parameterSection(name) {
+            if (['totalMass', 'bikerPower'].indexOf(name) !== -1) return 'rider';
+            if (['maxSpeed', 'S_C_x', 'C_r'].indexOf(name) !== -1) return 'bike';
+            if (/^(consider_elevation|avoid_steep_inclines|uphill.*|downhill.*|elevation.*)$/.test(name))
+                return 'elevation';
+            if (
+                /^(turnInstruction.*|considerTurnRestrictions|correctMisplacedViaPoints.*|continueStraight|add_beeline)$/.test(
+                    name
+                )
+            )
+                return 'navigation';
+            if (/^(processUnusedTags|pass[12]coefficient|validFor.*)$/.test(name)) return 'advanced';
+            if (
+                /^(allow_.*|avoid_.*|prefer_.*|consider_.*|.*cycleroutes|assume_wet_conditions|stick_to_cycleroutes)$/.test(
+                    name
+                )
+            )
+                return 'preferences';
+            return 'other';
+        },
+    },
     cache: {},
     storageKey: 'routingprofile.customText',
     libraryKey: 'routingprofile.library',
@@ -422,13 +444,24 @@ BR.Profile = L.Evented.extend({
                 return p1 + value + p3;
             });
         });
-        return profileText;
+        const ratings = BR.RidingPreferences.ratings(profileText);
+        let changed = false;
+        Object.keys(ratings).forEach((id) => {
+            const name = 'rider_pref_' + id;
+            if (formValues[name] !== undefined) {
+                const value = Number(formValues[name]);
+                changed = changed || value !== ratings[id];
+                ratings[id] = value;
+            }
+        });
+        return changed ? BR.RidingPreferences.build(profileText, ratings) : profileText;
     },
 
     _getFormValues() {
         const obj = {};
         document.querySelectorAll('#profile_params input, #profile_params select').forEach((input) => {
             const name = input.name;
+            if (input.type === 'radio' && !input.checked) return;
             let value;
             if (input.type == 'checkbox') {
                 value = input.checked;
@@ -448,7 +481,10 @@ BR.Profile = L.Evented.extend({
             callback(err, profileId, profileText) {
                 if (!err) {
                     that.profileName = profileId;
+                    that.selectedProfileName = profileId;
                     that.cache[profileId] = profileText;
+                    that._setValue(profileText);
+                    that.editor.markClean();
                 }
             },
         });
@@ -494,7 +530,12 @@ BR.Profile = L.Evented.extend({
     },
 
     _buildParamsForm(profileText) {
-        if (!profileText) return;
+        if (!profileText) {
+            L.DomUtil.get('profile_params').textContent = '';
+            return;
+        }
+        const preferences = BR.RidingPreferences.supported(profileText);
+        const ratedToggles = preferences.map((preference) => preference.toggle);
 
         // Otherwise, create user friendly form
         var params = {};
@@ -561,12 +602,28 @@ BR.Profile = L.Evented.extend({
         }
         var paramsSection = L.DomUtil.get('profile_params');
         paramsSection.innerHTML = '';
+        const ridingSection = this._buildRidingPreferences(profileText, paramsSection, preferences);
+        const sections = {};
+        ['preferences', 'rider', 'bike', 'elevation', 'navigation', 'advanced', 'other'].forEach((id) => {
+            const section = id === 'preferences' && ridingSection ? ridingSection : document.createElement('section');
+            section.classList.add('profile-settings-section');
+            section.dataset.profileSection = id;
+            if (section !== ridingSection) {
+                const heading = document.createElement('h2');
+                heading.className = 'h6';
+                heading.textContent = i18next.t('sidebar.profile.section-' + id);
+                section.appendChild(heading);
+                paramsSection.appendChild(section);
+            }
+            sections[id] = section;
+        });
 
-        if (!Object.keys(params).length) {
+        if (!Object.keys(params).length && !preferences.length) {
             paramsSection.append(i18next.t('sidebar.profile.no_easy_configuration_warning'));
         }
 
         Object.keys(params).forEach(function (param) {
+            if (ratedToggles.indexOf(param) !== -1) return;
             var div = document.createElement('div');
             var label = document.createElement('label');
 
@@ -576,9 +633,9 @@ BR.Profile = L.Evented.extend({
                 : param;
             if (paramType == 'select') {
                 var select = document.createElement('select');
-                select.name = paramName;
+                select.name = param;
                 select.className = 'form-control form-control-sm';
-                label.htmlFor = select.id = 'customize-profile-' + paramName;
+                label.htmlFor = select.id = 'customize-profile-' + param;
 
                 var paramValues = params[param].possible_values;
                 Object.keys(paramValues).forEach(function (paramValue) {
@@ -596,8 +653,8 @@ BR.Profile = L.Evented.extend({
                 div.appendChild(select);
             } else {
                 var input = document.createElement('input');
-                input.name = paramName;
-                label.htmlFor = input.id = 'customize-profile-' + paramName;
+                input.name = param;
+                label.htmlFor = input.id = 'customize-profile-' + param;
                 if (paramType == 'number') {
                     input.type = 'number';
                     input.value = params[param].value;
@@ -610,6 +667,11 @@ BR.Profile = L.Evented.extend({
                 } else if (paramType == 'boolean') {
                     input.type = 'checkbox';
                     input.checked = params[param].value;
+                    input.setAttribute('role', 'switch');
+                    input.className = 'custom-control-input';
+                    div.className = 'custom-control custom-switch profile-toggle';
+                    label.className = 'custom-control-label';
+                    input.setAttribute('aria-describedby', 'profile-help-' + param);
 
                     div.appendChild(input);
                     label.append(paramName);
@@ -625,11 +687,74 @@ BR.Profile = L.Evented.extend({
                 ? i18next.t('profileParameters.' + param + '.description')
                 : params[param].description.replace(/^\s+|\s+$/g, '');
             helpBlock.innerHTML = description;
+            helpBlock.id = 'profile-help-' + param;
             helpBlock.className = 'help-block';
 
             div.appendChild(helpBlock);
-            paramsSection.appendChild(div);
+            sections[BR.Profile.parameterSection(param)].appendChild(div);
         });
+        Object.values(sections).forEach((section) => {
+            if (section.children.length === 1) section.remove();
+        });
+    },
+
+    _buildRidingPreferences(profileText, container, preferences) {
+        if (!preferences.length) return;
+        const ratings = BR.RidingPreferences.ratings(profileText);
+        const section = document.createElement('section');
+        section.className = 'riding-preferences';
+        const title = document.createElement('h2');
+        title.className = 'h6 mt-2';
+        title.textContent = i18next.t('sidebar.profile.riding-title');
+        section.appendChild(title);
+        const note = document.createElement('p');
+        note.className = 'help-block small';
+        note.textContent = i18next.t('sidebar.profile.riding-help');
+        section.appendChild(note);
+        preferences.forEach(({ id }) => {
+            const fieldset = document.createElement('fieldset');
+            fieldset.className = 'riding-preference';
+            const legend = document.createElement('legend');
+            legend.textContent = i18next.t('sidebar.profile.riding-' + id);
+            fieldset.appendChild(legend);
+            const description = document.createElement('p');
+            description.className = 'help-block small mb-2';
+            description.textContent = i18next.t('sidebar.profile.riding-' + id + '-help');
+            fieldset.appendChild(description);
+            const output = document.createElement('output');
+            output.className = 'riding-preference-value';
+            output.setAttribute('aria-live', 'polite');
+            const buttons = document.createElement('div');
+            buttons.className = 'riding-preference-buttons';
+            for (let value = 1; value <= 5; value++) {
+                const label = document.createElement('label');
+                label.className = 'btn btn-outline-secondary';
+                const input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'rider_pref_' + id;
+                input.value = value;
+                input.checked = ratings[id] === value;
+                input.className = 'riding-preference-radio';
+                input.setAttribute('aria-label', i18next.t('sidebar.profile.rating-' + value));
+                label.appendChild(input);
+                label.append(String(value));
+                buttons.appendChild(label);
+            }
+            const render = () => {
+                const selected = buttons.querySelector('input:checked');
+                buttons.querySelectorAll('label').forEach((label) => {
+                    label.classList.toggle('active', label.querySelector('input').checked);
+                });
+                output.textContent = selected.value + '/5 · ' + i18next.t('sidebar.profile.rating-' + selected.value);
+            };
+            buttons.addEventListener('change', render);
+            render();
+            fieldset.appendChild(buttons);
+            fieldset.appendChild(output);
+            section.appendChild(fieldset);
+        });
+        container.appendChild(section);
+        return section;
     },
 
     _isParamsFormActive() {

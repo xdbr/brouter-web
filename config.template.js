@@ -40,6 +40,7 @@
 
     BR.conf.profiles = [
         'trekking',
+        'gravel',
         'fastbike',
         'car-eco',
         'car-fast',
