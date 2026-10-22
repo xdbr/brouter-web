@@ -289,7 +289,67 @@
     "tooltip-mastodon": "Share on Mastodon",
     "tooltip-whatsapp": "Share on WhatsApp"
   },
+  "profileParameterOptions": {
+    "turnInstructionMode": {
+      "0": "No turn directions",
+      "1": "Automatic",
+      "2": "Locus Map",
+      "3": "OsmAnd",
+      "4": "Comments",
+      "5": "GPSies",
+      "6": "OruxMaps",
+      "7": "Locus Map (legacy)"
+    }
+  },
   "profileParameters": {
+    "maxSpeed": {
+      "name": "Maximum speed (km/h)",
+      "description": "Upper speed used to estimate riding time. This is not your target average speed."
+    },
+    "bikerPower": {
+      "name": "Steady riding effort (W)",
+      "description": "The pedalling power you can sustain over the ride, in watts. Higher values give faster estimated riding times; this is not your peak sprint power."
+    },
+    "totalMass": {
+      "name": "Total weight (kg)",
+      "description": "Your weight plus your bike, bags, and equipment. Used when estimating riding time, especially on climbs."
+    },
+    "S_C_x": {
+      "name": "Air resistance",
+      "description": "How strongly the air slows you down. A lower value represents a more streamlined riding position. Keep the profile default if you are unsure."
+    },
+    "C_r": {
+      "name": "Tyre rolling resistance",
+      "description": "How much energy your tyres lose as they roll. Lower values represent easier-rolling tyres. Keep the profile default if you are unsure."
+    },
+    "uphillcost": {
+      "name": "Climbing penalty",
+      "description": "How strongly climbing adds to the route cost. Higher values favor routes with less climbing; 0 removes this penalty."
+    },
+    "downhillcost": {
+      "name": "Descending penalty",
+      "description": "How strongly descending adds to the route cost. Higher values discourage descents; 0 removes this penalty."
+    },
+    "uphillcutoff": {
+      "name": "Uphill gradient threshold (%)",
+      "description": "Gradients below this threshold do not contribute to the climbing penalty."
+    },
+    "downhillcutoff": {
+      "name": "Downhill gradient threshold (%)",
+      "description": "Gradients below this threshold do not contribute to the descending penalty."
+    },
+    "turnInstructionMode": {
+      "name": "Navigation instruction format",
+      "description": "Choose how turn-by-turn directions are included in an exported route. Automatic uses the format chosen by the routing engine."
+    },
+    "turnInstructionCatchingRange": {
+      "name": "Turn instruction range (m)",
+      "description": "Look this far around a junction when combining nearby turns into one instruction."
+    },
+    "correctMisplacedViaPointsDistance": {
+      "name": "Waypoint detour limit (m)",
+      "description": "With waypoint detour trimming enabled, only trim detours shorter than this distance. Set 0 to remove the distance limit."
+    },
     "allow_steps": {
       "name": "Allow stairs",
       "description": "Include routes with stairs, where you may need to carry or push your bike. Turn off to exclude stairs."

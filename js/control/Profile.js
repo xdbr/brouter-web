@@ -634,6 +634,7 @@ BR.Profile = L.Evented.extend({
             if (paramType == 'select') {
                 var select = document.createElement('select');
                 select.name = param;
+                select.setAttribute('aria-describedby', 'profile-help-' + param);
                 select.className = 'form-control form-control-sm';
                 label.htmlFor = select.id = 'customize-profile-' + param;
 
@@ -644,7 +645,8 @@ BR.Profile = L.Evented.extend({
                     if (paramValue == params[param].value) {
                         option.selected = true;
                     }
-                    option.append(paramValues[paramValue]);
+                    const optionKey = 'profileParameterOptions.' + param + '.' + paramValue;
+                    option.append(i18next.exists(optionKey) ? i18next.t(optionKey) : paramValues[paramValue]);
                     select.appendChild(option);
                 });
 
@@ -657,6 +659,8 @@ BR.Profile = L.Evented.extend({
                 label.htmlFor = input.id = 'customize-profile-' + param;
                 if (paramType == 'number') {
                     input.type = 'number';
+                    input.step = 'any';
+                    input.setAttribute('aria-describedby', 'profile-help-' + param);
                     input.value = params[param].value;
                     input.className = 'form-control form-control-sm';
 
