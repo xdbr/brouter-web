@@ -1413,7 +1413,7 @@
                                             class="btn btn-primary btn-sm"
                                             data-i18n="sidebar.profile.save-as"
                                         >
-                                            Save as new
+                                            Save profile
                                         </button>
                                         <button
                                             id="profile-rename"
@@ -1433,8 +1433,8 @@
                                         </button>
                                     </div>
                                     <small data-i18n="sidebar.profile.saved-help"
-                                        >Apply updates the selected saved profile. Save as new creates a separate
-                                        copy.</small
+                                        >Save profile creates a named copy. Applying changes also updates the selected
+                                        saved profile.</small
                                     >
                                 </div>
                                 <div id="profile_message"></div>
@@ -1474,7 +1474,67 @@
                                         role="tabpanel"
                                         aria-labelledby="params-tab"
                                     >
-                                        <div id="profile_params"></div>
+                                        <div id="profile_options_scroll">
+                                            <div class="custom-control custom-switch mb-2 mt-2">
+                                                <input
+                                                    type="checkbox"
+                                                    class="custom-control-input"
+                                                    id="profile-auto-apply"
+                                                    role="switch"
+                                                    aria-describedby="profile-auto-apply-help"
+                                                />
+                                                <label
+                                                    class="custom-control-label"
+                                                    for="profile-auto-apply"
+                                                    data-i18n="sidebar.profile.auto-apply"
+                                                    >Apply automatically</label
+                                                >
+                                            </div>
+                                            <p
+                                                id="profile-auto-apply-help"
+                                                class="help-block small"
+                                                data-i18n="sidebar.profile.auto-apply-help"
+                                            >
+                                                Changes update the route and the selected saved profile after a short
+                                                pause. Turn off to use Apply manually.
+                                            </p>
+                                            <p
+                                                id="profile-auto-apply-status"
+                                                class="small"
+                                                role="status"
+                                                aria-live="polite"
+                                            ></p>
+                                            <div class="custom-control custom-switch mb-2">
+                                                <input
+                                                    type="checkbox"
+                                                    class="custom-control-input"
+                                                    id="profile-route-estimates"
+                                                    role="switch"
+                                                    aria-describedby="profile-route-estimates-help"
+                                                />
+                                                <label
+                                                    class="custom-control-label"
+                                                    for="profile-route-estimates"
+                                                    data-i18n="sidebar.profile.estimates-title"
+                                                    >Show route estimates</label
+                                                >
+                                            </div>
+                                            <p
+                                                id="profile-route-estimates-help"
+                                                class="help-block small"
+                                                data-i18n="sidebar.profile.estimates-help"
+                                            >
+                                                Compare changing one forest, water, or signed cycle-route option with
+                                                your current settings. Estimates cannot be added together.
+                                            </p>
+                                            <p
+                                                id="profile-route-estimates-status"
+                                                class="small"
+                                                role="status"
+                                                aria-live="polite"
+                                            ></p>
+                                            <div id="profile_params"></div>
+                                        </div>
                                         <div class="form-group pt-1">
                                             <button id="save" type="button" class="btn btn-primary btn-sm">
                                                 <span class="fa fa-cloud-upload"></span>
@@ -1604,24 +1664,18 @@
                             >
                         </p>
                     </li>
-                    <li>
-                        <div class="text-muted small d-none d-md-block">
-                            <span data-i18n="footer.total-energy">Total Energy</span>&#8239;|&#8239;<span
-                                data-i18n="footer.energy-per-100km"
-                                >Energy per 100 km</span
-                            >
+                    <li
+                        data-i18n="[title]footer.calories-help"
+                        title="Estimated cycling calories from route energy, assuming 24% efficiency. Uses Total weight (you, bike, and bags), riding effort, and terrain. Change Total weight under Rider information, then apply the profile to recalculate."
+                    >
+                        <div class="text-muted small d-none d-md-block" data-i18n="footer.calories">
+                            Estimated calories
                         </div>
                         <p class="stats-label">
-                            <span id="totalenergy">-</span><span class="d-none d-md-inline">&#8239;</span
-                            ><abbr
-                                class="d-none d-md-inline"
-                                data-i18n="[title]footer.kilowatthour;footer.kilowatthour-abbrev"
-                                title="kilowatt hours"
-                                >kWh</abbr
-                            >&#8239;|&#8239;<span id="meanenergy">-</span>&#8239;<abbr
-                                data-i18n="[title]footer.kilowatthour;footer.kilowatthour-abbrev"
-                                title="kilowatt hours"
-                                >kWh</abbr
+                            <span id="calories">-</span>&#8239;<abbr
+                                data-i18n="[title]footer.kilocalories"
+                                title="kilocalories"
+                                >kcal</abbr
                             >
                         </p>
                     </li>

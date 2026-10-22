@@ -282,19 +282,24 @@
         profile.on('update', function (evt) {
             BR.message.hide();
             const uploadVersion = ++profileUploadVersion;
-            var profileId = evt.restoring ? null : routingOptions.getCustomProfile();
+            // Never let a superseded form upload overwrite the active backend profile.
+            var profileId = evt.restoring || evt.isCurrent ? null : routingOptions.getCustomProfile();
             const selectedProfile = routingOptions.getOptions().profile;
             // Keep the source even if uploading fails or the temporary server copy expires.
-            profile.rememberCustomProfile(evt.profileText);
+            if (!evt.automatic) profile.rememberCustomProfile(evt.profileText);
             router.uploadProfile(profileId, evt.profileText, function (err, profileId) {
                 if (
                     uploadVersion !== profileUploadVersion ||
+                    (evt.isCurrent && !evt.isCurrent()) ||
                     (evt.restoring &&
                         (routingOptions.getOptions().profile !== selectedProfile ||
                             profile.editor.getValue() !== evt.profileText))
                 ) {
+                    if (evt.callback) evt.callback(L.BRouter.ABORTED_ERROR);
                     return;
                 }
+                // Persist automatic changes only once the response still matches the form.
+                if (evt.automatic) profile.rememberCustomProfile(evt.profileText);
                 if (!err) {
                     routingOptions.setCustomProfile(profileId, true, profile.activeSavedId);
                     updateRoute({
@@ -303,7 +308,7 @@
                     urlHash.onMapMove();
                 } else {
                     profile.message.showError(err);
-                    if (profileId) {
+                    if (profileId && !evt.isCurrent) {
                         routingOptions.setCustomProfile(profileId, true, profile.activeSavedId);
                         router.setOptions(routingOptions.getOptions());
                     }
@@ -402,6 +407,7 @@
         }
 
         routing.addTo(map);
+        new BR.RouteImpact(profile, routing, router);
 
         elevation.addBelow(map);
 

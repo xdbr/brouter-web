@@ -32,6 +32,12 @@
 
     // name of the web app/instance, e.g. used as GPX creator and link text
     BR.conf.appName = 'BRouter-Web';
+    // Enable only for a private routing backend; automatic edits send extra requests.
+    BR.conf.allowAutoApply = false;
+    // Background comparisons also require a private routing backend.
+    BR.conf.allowRouteEstimates = false;
+    // Private backends can use 1–32 workers; leave backend threads available for Apply.
+    BR.conf.routeEstimateConcurrency = 1;
     BR.conf.privacyPolicyUrl = '/privacypolicy.html';
 
     // Set the initial position and zoom level of the map

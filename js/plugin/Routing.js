@@ -323,6 +323,7 @@ BR.Routing = L.Routing.extend({
         this._waypoints.clearLayers();
         this._segments.clearLayers();
         this._removeDistanceMarkers();
+        this.fire('routing:cleared');
 
         if (drawEnabled) {
             this.draw(true);

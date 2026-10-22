@@ -727,7 +727,7 @@ table.dataTable.display tbody tr:hover.selected {
     height: 100%;
 }
 
-#profile_params,
+#profile_options_scroll,
 .CodeMirror {
     /* auto instead of 1 to avoid overflow to content height in Firefox */
     flex: auto;
@@ -735,7 +735,7 @@ table.dataTable.display tbody tr:hover.selected {
     height: 0;
 }
 
-#profile_params {
+#profile_options_scroll {
     overflow-y: scroll;
     padding-right: 5px;
 }
@@ -771,7 +771,7 @@ table.dataTable.display tbody tr:hover.selected {
 
 /* layers control as sidebar tab */
 #tab_layers_control,
-#profile_params {
+#profile_options_scroll {
     font-size: 0.9rem;
     line-height: normal;
 }
@@ -1244,6 +1244,27 @@ table.dataTable.display tbody tr:hover.selected {
     margin-top: 4px;
     font-size: 0.8rem;
     color: #495057;
+}
+.route-impact-value {
+    display: block;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+#profile-auto-apply-status:empty,
+#profile-route-estimates-status:empty {
+    display: none;
+}
+.riding-preference-buttons label {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.profile-toggle > .route-impact-value {
+    margin-top: 6px;
+    color: #495057;
+    font-size: 0.8rem;
 }
 @media (pointer: coarse) {
     .riding-preference-buttons label {

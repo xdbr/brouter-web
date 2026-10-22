@@ -65,6 +65,30 @@ BR.Profile = L.Evented.extend({
         });
         this.savedProfiles = [];
         this._sectionOpen = {};
+        this._editVersion = 0;
+        this._applyVersion = 0;
+        this._autoApplySwitch = L.DomUtil.get('profile-auto-apply');
+        this._autoApplyStatus = L.DomUtil.get('profile-auto-apply-status');
+        this._autoApplySwitch.disabled = !BR.conf.allowAutoApply;
+        L.DomUtil.get('profile-auto-apply-help').textContent = i18next.t(
+            'sidebar.profile.' + (BR.conf.allowAutoApply ? 'auto-apply-help' : 'auto-apply-unavailable')
+        );
+        let autoApply = true;
+        try {
+            autoApply = localStorage.getItem('routingprofile.autoApply') !== 'false';
+        } catch (err) {
+            // The switch still works when browser storage is unavailable.
+        }
+        this._autoApplySwitch.checked = !!BR.conf.allowAutoApply && autoApply;
+        this._autoApplySwitch.onchange = () => {
+            this.cancelPendingApply();
+            try {
+                localStorage.setItem('routingprofile.autoApply', String(this._autoApplySwitch.checked));
+            } catch (err) {
+                // Keep the choice for this session.
+            }
+            if (this._autoApplySwitch.checked) this._scheduleAutoApply();
+        };
         this.activeSavedId = null;
         this._loadLibrary();
         this._renderLibrary();
@@ -85,10 +109,31 @@ BR.Profile = L.Evented.extend({
         L.DomUtil.get('profile-save-as').onclick = () => this.saveNamedProfile(false);
         L.DomUtil.get('profile-rename').onclick = () => this.saveNamedProfile(true);
         L.DomUtil.get('profile-delete').onclick = () => this.deleteSavedProfile();
-        $('#profile_params').on('input change', 'input, select', () => this._markDefaultEdited());
-        this.editor.on('change', (editor, change) => {
-            if (change.origin !== 'setValue') this._markDefaultEdited();
+        $('#profile_params').on('input change', 'input, select', () => {
+            this._editVersion++;
+            this._markDefaultEdited();
+            this._scheduleAutoApply();
         });
+        this.editor.on('change', (editor, change) => {
+            if (change.origin !== 'setValue') {
+                this.cancelPendingApply();
+                this._markDefaultEdited();
+            }
+        });
+    },
+
+    cancelPendingApply() {
+        clearTimeout(this._autoApplyTimer);
+        this._pendingApply = null;
+        this._editVersion++;
+        this._autoApplyStatus.textContent = '';
+    },
+
+    _scheduleAutoApply() {
+        clearTimeout(this._autoApplyTimer);
+        if (!BR.conf.allowAutoApply || !this._autoApplySwitch.checked || !this._isParamsFormActive()) return;
+        this._autoApplyStatus.textContent = i18next.t('sidebar.profile.auto-apply-waiting');
+        this._autoApplyTimer = setTimeout(() => this._save(null, true), 400);
     },
 
     _markDefaultEdited() {
@@ -122,6 +167,7 @@ BR.Profile = L.Evented.extend({
     },
 
     update(options, cb) {
+        this.cancelPendingApply();
         var profileName = options.profile,
             profileUrl,
             loading = false;
@@ -449,8 +495,8 @@ BR.Profile = L.Evented.extend({
         });
     },
 
-    _buildCustomProfile(profileText) {
-        const formValues = this._getFormValues();
+    _buildCustomProfile(profileText, overrides = {}) {
+        const formValues = Object.assign(this._getFormValues(), overrides);
         Object.keys(formValues).forEach((name) => {
             const value = formValues[name];
             var re = new RegExp(
@@ -510,20 +556,54 @@ BR.Profile = L.Evented.extend({
         return obj;
     },
 
-    _save(evt) {
-        if (!this._validateParams()) return;
+    _save(evt, automatic = false) {
+        clearTimeout(this._autoApplyTimer);
+        if (automatic && (!BR.conf.allowAutoApply || !this._autoApplySwitch.checked || !this._isParamsFormActive()))
+            return;
+        if (!this._validateParams(!automatic)) {
+            this._autoApplyStatus.textContent = i18next.t('sidebar.profile.auto-apply-invalid');
+            return;
+        }
         var profileText = this._buildCustomProfile(this._getProfileText());
-        var that = this;
+        if (
+            automatic &&
+            (!profileText.trim() || (profileText === this._lastAppliedText && profileText === this._lastRequestedText))
+        ) {
+            this._autoApplyStatus.textContent = '';
+            return;
+        }
+        if (this._applyInFlight) {
+            this._pendingApply = { automatic };
+            return;
+        }
+        this._applyInFlight = true;
+        this._lastRequestedText = profileText;
+        const revision = this._editVersion;
+        const version = ++this._applyVersion;
+        const isCurrent = () => version === this._applyVersion && revision === this._editVersion;
+        this._autoApplyStatus.textContent = i18next.t('sidebar.profile.auto-apply-running');
         this.fire('update', {
             profileText,
-            callback(err, profileId, profileText) {
-                if (!err) {
-                    that.profileName = profileId;
-                    that.selectedProfileName = profileId;
-                    that.cache[profileId] = profileText;
-                    that._setValue(profileText);
-                    that.editor.markClean();
+            automatic,
+            isCurrent,
+            callback: (err, profileId, savedText = profileText) => {
+                const current = isCurrent();
+                // Read this before _setValue clears pending work and advances the edit version.
+                const pending = this._pendingApply;
+                this._pendingApply = null;
+                this._applyInFlight = false;
+                if (!err && current) {
+                    this.profileName = profileId;
+                    this.selectedProfileName = profileId;
+                    this.cache[profileId] = savedText;
+                    this._setValue(savedText, automatic);
+                    this.editor.markClean();
+                    this._lastAppliedText = savedText;
+                    this._autoApplyStatus.textContent = i18next.t('sidebar.profile.auto-apply-done');
+                } else if (err && current) {
+                    this._autoApplyStatus.textContent = i18next.t('sidebar.profile.auto-apply-error');
                 }
+                if (pending) this._save(null, pending.automatic);
             },
         });
     },
@@ -548,7 +628,8 @@ BR.Profile = L.Evented.extend({
         }
     },
 
-    _setValue(profileText) {
+    _setValue(profileText, preserveForm = false) {
+        this.cancelPendingApply();
         profileText = profileText || '';
 
         var clean = this.editor.isClean();
@@ -562,9 +643,10 @@ BR.Profile = L.Evented.extend({
             this.editor.markClean();
         }
 
-        if (this._isParamsFormActive()) {
+        if (this._isParamsFormActive() && !preserveForm) {
             this._buildParamsForm(profileText);
         }
+        this.fire('textchange');
     },
 
     _buildParamsForm(profileText) {
@@ -904,12 +986,12 @@ BR.Profile = L.Evented.extend({
         return !message;
     },
 
-    _validateParams() {
+    _validateParams(focusInvalid = true) {
         let firstInvalid;
         document.querySelectorAll('#profile_params input[type="number"]').forEach((input) => {
             if (!this._validateNumber(input) && !firstInvalid) firstInvalid = input;
         });
-        if (firstInvalid) {
+        if (firstInvalid && focusInvalid) {
             const details = firstInvalid.closest('details');
             if (details) details.open = true;
             firstInvalid.focus();

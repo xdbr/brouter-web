@@ -700,3 +700,171 @@ assign turnInstructionMode = 1 # %turnInstructionMode% | Navigation | [0=none, 1
     expect(select.selectedOptions[0].textContent).toBe('custom');
     expect(profile._currentText()).toContain('assign turnInstructionMode = 9');
 });
+
+describe('automatic profile application', () => {
+    const gravel = require('../util/data/ridingProfile.js');
+    let updates;
+    const input = (name) => document.querySelector('#profile_params [name="' + name + '"]');
+    const change = (name, value) => {
+        const field = input(name);
+        field.value = value;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        return field;
+    };
+    const autoSwitch = () => document.getElementById('profile-auto-apply');
+
+    beforeEach(() => {
+        jest.useFakeTimers();
+        BR.conf.allowAutoApply = true;
+        document.body = indexHtml.body.cloneNode(true);
+        profile = new BR.Profile();
+        profile._setValue(gravel);
+        updates = [];
+        profile.on('update', (evt) => updates.push(evt));
+    });
+
+    afterEach(() => {
+        profile.cancelPendingApply();
+        jest.useRealTimers();
+    });
+
+    test('rapid changes send the latest values once and preserve focus and the form', () => {
+        const field = change('bikerPower', '160');
+        field.focus();
+        jest.advanceTimersByTime(250);
+        change('bikerPower', '175.5');
+        jest.advanceTimersByTime(399);
+        expect(updates).toHaveLength(0);
+        jest.advanceTimersByTime(1);
+        expect(updates).toHaveLength(1);
+        expect(updates[0].profileText).toContain('assign bikerPower = 175.5');
+        expect(updates[0].isCurrent()).toBe(true);
+        updates[0].callback(null, 'custom_auto', updates[0].profileText);
+        expect(input('bikerPower')).toBe(field);
+        expect(document.activeElement).toBe(field);
+        expect(profile.editor.getValue()).toContain('assign bikerPower = 175.5');
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        jest.advanceTimersByTime(400);
+        expect(updates).toHaveLength(1);
+    });
+
+    test('forest rating changes use the existing weighted profile generator', () => {
+        document.querySelector('[name="rider_pref_forest"][value="2"]').click();
+        jest.advanceTimersByTime(100);
+        document.querySelector('[name="rider_pref_forest"][value="5"]').click();
+        jest.advanceTimersByTime(400);
+        expect(updates).toHaveLength(1);
+        expect(BR.RidingPreferences.ratings(updates[0].profileText).forest).toBe(5);
+    });
+
+    test('turning automatic updates off cancels queued work and preserves manual Apply', () => {
+        change('bikerPower', '175');
+        autoSwitch().click();
+        jest.advanceTimersByTime(1000);
+        expect(updates).toHaveLength(0);
+        expect(localStorage.getItem('routingprofile.autoApply')).toBe('false');
+        document.getElementById('save').click();
+        expect(updates).toHaveLength(1);
+    });
+
+    test('off cancels an in-flight result and does not send queued edits', () => {
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        change('bikerPower', '185');
+        jest.advanceTimersByTime(400);
+        autoSwitch().click();
+        expect(updates[0].isCurrent()).toBe(false);
+        updates[0].callback(null, 'custom_stale', updates[0].profileText);
+        expect(updates).toHaveLength(1);
+        expect(input('bikerPower').value).toBe('185');
+    });
+
+    test('uploads are serialized and stale responses cannot overwrite newer edits', () => {
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        change('bikerPower', '185');
+        jest.advanceTimersByTime(400);
+        expect(updates).toHaveLength(1);
+        expect(updates[0].isCurrent()).toBe(false);
+        updates[0].callback(null, 'custom_old', updates[0].profileText);
+        expect(updates).toHaveLength(2);
+        expect(input('bikerPower').value).toBe('185');
+        expect(updates[1].profileText).toContain('assign bikerPower = 185');
+        updates[1].callback(null, 'custom_latest', updates[1].profileText);
+        expect(profile.profileName).toBe('custom_latest');
+        expect(profile.editor.getValue()).toContain('assign bikerPower = 185');
+    });
+
+    test('invalid values do not upload or pull focus into a collapsed section', () => {
+        const field = change('bikerPower', '');
+        const details = field.closest('details');
+        details.open = false;
+        jest.advanceTimersByTime(400);
+        expect(updates).toHaveLength(0);
+        expect(details.open).toBe(false);
+        expect(document.getElementById('profile-auto-apply-status').textContent).toContain('highlighted');
+    });
+
+    test('returning to the last applied value supersedes a different in-flight update', () => {
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        updates[0].callback(null, 'custom_first', updates[0].profileText);
+        change('bikerPower', '185');
+        jest.advanceTimersByTime(400);
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        expect(updates).toHaveLength(2);
+        expect(updates[1].isCurrent()).toBe(false);
+        updates[1].callback(null, 'custom_obsolete', updates[1].profileText);
+        expect(updates).toHaveLength(3);
+        expect(updates[2].profileText).toContain('assign bikerPower = 175');
+        expect(updates[2].automatic).toBe(true);
+        expect(updates[2].isCurrent()).toBe(true);
+    });
+
+    test('a failed update preserves edits and allows a manual retry', () => {
+        const field = change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        updates[0].callback(new Error('offline'));
+        expect(input('bikerPower')).toBe(field);
+        expect(field.value).toBe('175');
+        expect(profile.editor.getValue()).toBe(gravel);
+        expect(document.getElementById('profile-auto-apply-status').textContent).toContain('Try Apply');
+        document.getElementById('save').click();
+        expect(updates).toHaveLength(2);
+        expect(updates[1].automatic).toBe(false);
+    });
+
+    test('loading another profile cancels pending work and ignores earlier responses', () => {
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(400);
+        change('bikerPower', '185');
+        profile._setValue(profileText);
+        updates[0].callback(null, 'custom_old', updates[0].profileText);
+        jest.advanceTimersByTime(1000);
+        expect(updates).toHaveLength(1);
+        expect(profile.editor.getValue()).toBe(profileText);
+    });
+
+    test('raw profile editing stays manual and cancels pending option updates', () => {
+        change('bikerPower', '175');
+        toggleSecondaryTab();
+        profile.editor.handlers.change(profile.editor, { origin: '+input' });
+        jest.advanceTimersByTime(1000);
+        expect(updates).toHaveLength(0);
+    });
+
+    test('shared backends stay manual even with a stored preference for automatic updates', () => {
+        localStorage.setItem('routingprofile.autoApply', 'true');
+        BR.conf.allowAutoApply = false;
+        document.body = indexHtml.body.cloneNode(true);
+        profile = new BR.Profile();
+        profile._setValue(gravel);
+        profile.on('update', (evt) => updates.push(evt));
+        expect(autoSwitch().disabled).toBe(true);
+        expect(autoSwitch().checked).toBe(false);
+        change('bikerPower', '175');
+        jest.advanceTimersByTime(1000);
+        expect(updates).toHaveLength(0);
+    });
+});

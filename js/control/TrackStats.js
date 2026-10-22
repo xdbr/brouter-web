@@ -1,4 +1,13 @@
 BR.TrackStats = L.Class.extend({
+    statics: {
+        estimateCalories(energy) {
+            if (!Number.isFinite(energy) || energy < 0) return null;
+            // BRouter reports mechanical joules, already accounting for totalMass.
+            // Convert to metabolic kcal using an assumed 24% cycling efficiency.
+            // https://pmc.ncbi.nlm.nih.gov/articles/PMC6557926/
+            return energy / (4184 * 0.24);
+        },
+    },
     update(polyline, segments) {
         if (segments.length == 0) {
             $('#stats-container').hide();
@@ -25,10 +34,7 @@ BR.TrackStats = L.Class.extend({
             formattedTime =
                 Math.trunc(stats.totalTime / 3600) + ':' + ('0' + Math.trunc((stats.totalTime % 3600) / 60)).slice(-2),
             formattedTimeHMS = formattedTime + ':' + ('0' + Math.trunc(stats.totalTime % 60)).slice(-2),
-            formattedEnergy = L.Util.formatNum(stats.totalEnergy / 3600000, 2).toLocaleString(),
-            meanEnergy = stats.trackLength
-                ? L.Util.formatNum(stats.totalEnergy / 36 / stats.trackLength, 2).toLocaleString()
-                : '0';
+            calories = BR.TrackStats.estimateCalories(stats.totalEnergy);
 
         $('#distance').html(length1);
         // alternative 3-digit format down to meters as tooltip
@@ -40,8 +46,7 @@ BR.TrackStats = L.Class.extend({
         $('#totaltime').html(formattedTime);
         // alternative time format with seconds display as tooltip
         $('#totaltime').attr('title', formattedTimeHMS + ' h');
-        $('#totalenergy').html(formattedEnergy);
-        $('#meanenergy').html(meanEnergy);
+        $('#calories').text(calories === null ? '–' : '≈' + Math.round(calories).toLocaleString());
     },
 
     calcStats(polyline, segments) {
@@ -61,7 +66,9 @@ BR.TrackStats = L.Class.extend({
             stats.filteredAscend += +props['filtered ascend'];
             stats.plainAscend += +props['plain-ascend'];
             stats.totalTime += +props['total-time'];
-            stats.totalEnergy += +props['total-energy'];
+            const energy = props['total-energy'];
+            stats.totalEnergy +=
+                energy == null || String(energy).trim() === '' || Number(energy) < 0 ? NaN : Number(energy);
             stats.cost += +props['cost'];
         }
 
