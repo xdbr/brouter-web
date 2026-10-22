@@ -233,6 +233,10 @@
         routingOptions = new BR.RoutingOptions();
         routingOptions.on('update', function (evt) {
             if (urlHash.movingMap) return;
+            if (evt.alternativeOnly) {
+                updateRoute(evt);
+                return;
+            }
 
             profile.update(evt.options, () => {
                 updateRoute(evt);

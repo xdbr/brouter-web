@@ -32,10 +32,26 @@
                 <div class="navbar-nav">
                     <form class="form-inline" id="profile-alternative-form">
                         <div class="form-group">
-                            <select class="selectpicker show-tick" data-width="250px" id="profile-alternative" multiple>
+                            <select
+                                class="selectpicker show-tick"
+                                data-width="250px"
+                                id="profile-alternative"
+                                aria-label="Routing profile"
+                                data-i18n="[aria-label]navbar.routing-profile"
+                            >
                                 <optgroup label="Profile" data-max-options="1" data-icon="fa-bicycle" id="profile">
                                     <option data-i18n="navbar.profile.custom">Custom</option>
                                 </optgroup>
+                            </select>
+                        </div>
+                        <div class="form-group ml-md-2">
+                            <select
+                                class="selectpicker show-tick"
+                                data-width="160px"
+                                id="route-alternative"
+                                aria-label="Route alternative"
+                                data-i18n="[aria-label]navbar.route-alternative"
+                            >
                                 <optgroup
                                     label="Alternative"
                                     data-max-options="1"
@@ -439,7 +455,7 @@
                             </li>
                             <li>
                                 <div class="keyboard-shortcuts-desc" data-i18n="help.shortcut-exit-draw">
-                                    Exit draw mode or close dialog
+                                    Exit draw mode or close a dialog or dropdown
                                 </div>
                                 <div class="keyboard-shortcuts-key"><kbd>Esc</kbd></div>
                             </li>
@@ -530,6 +546,12 @@
                                     Select routing profile
                                 </div>
                                 <div class="keyboard-shortcuts-key"><kbd>g</kbd></div>
+                            </li>
+                            <li>
+                                <div class="keyboard-shortcuts-desc" data-i18n="help.shortcut-alternative-select">
+                                    Select route alternative
+                                </div>
+                                <div class="keyboard-shortcuts-key"><kbd>Shift</kbd> <kbd>g</kbd></div>
                             </li>
                             <li>
                                 <div class="keyboard-shortcuts-desc" data-i18n="help.shortcut-export">Export route</div>

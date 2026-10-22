@@ -6,7 +6,7 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     initialize() {
-        $('#profile-alternative').on('changed.bs.select', this._getChangeHandler());
+        $('#profile-alternative, #route-alternative').on('changed.bs.select', this._getChangeHandler());
 
         var remembered_profile = this.getRememberedProfile();
         var remembered_profile_was_selected = false;
@@ -38,30 +38,41 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     refreshUI() {
-        // we do not allow to select more than one profile and/or alternative at a time
-        // so we disable the current selected items
-        $('#profile-alternative')
-            .find('option:disabled')
-            .each(function (index) {
-                $(this).prop('disabled', false);
-            });
-        $('#profile-alternative')
-            .find('option:selected')
-            .each(function (index) {
-                $(this).prop('disabled', true);
-            });
-
         // disable custom option if it has no value yet (default value is "Custom")
         var custom = L.DomUtil.get('custom-routing-profile');
         if (custom.value === 'Custom') {
             custom.disabled = true;
         }
         $('#profile option[data-profile-heading]').prop('disabled', true);
-        $('.selectpicker').selectpicker('refresh');
+        $('#profile-alternative, #route-alternative').selectpicker('refresh');
 
-        // append shortcut text to tooltip
-        var button = $('#profile-alternative-form button')[0];
-        button.title = button.title + i18next.t('navbar.profile-tooltip', { key: 'G' });
+        [
+            ['#profile-alternative', 'G'],
+            ['#route-alternative', 'Shift+G'],
+        ].forEach(([selector, key]) => {
+            const picker = $(selector).data('selectpicker');
+            if (picker) {
+                // Return keyboard focus to the map after closing or confirming,
+                // so letter shortcuts do not reopen the focused toggle.
+                if (!picker.routingEscapeBound) {
+                    picker.$newElement[0].addEventListener(
+                        'keydown',
+                        (event) => {
+                            if (event.keyCode === 27) this._keydownListener(event);
+                            if (event.keyCode === 13 && picker.$newElement.hasClass('show')) {
+                                // Wait for the entire event dispatch, including the
+                                // plugin's delegated handler on document, to finish.
+                                setTimeout(() => this._exitSelection(picker), 0);
+                            }
+                        },
+                        true
+                    );
+                    picker.routingEscapeBound = true;
+                }
+                const text = $(selector).find('option:selected').text();
+                picker.$button.attr('title', text + i18next.t('navbar.profile-tooltip', { key }));
+            }
+        });
     },
 
     getOptions() {
@@ -81,11 +92,14 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     setOptions(options) {
-        var values = [
-            options.profile ? options.profile : $('#profile option:selected').val(),
-            options.alternative ? options.alternative : $('#alternative option:selected').val(),
-        ];
-        $('.selectpicker').selectpicker('val', values);
+        // Update both controls together without routing with a partial selection.
+        this.settingOptions = true;
+        try {
+            if (options.profile != null) $('#profile-alternative').selectpicker('val', options.profile);
+            if (options.alternative != null) $('#route-alternative').selectpicker('val', String(options.alternative));
+        } finally {
+            this.settingOptions = false;
+        }
         this.refreshUI();
 
         if (options.profile && L.BRouter.isCustomProfile(options.profile)) {
@@ -145,9 +159,9 @@ BR.RoutingOptions = L.Evented.extend({
     },
 
     restoreSelection(values) {
-        if (!Array.isArray(values)) return;
+        const selectedValues = Array.isArray(values) ? values : [values];
         Array.from(L.DomUtil.get('profile-alternative').options).forEach((option) => {
-            option.selected = values.indexOf(option.value) !== -1;
+            option.selected = selectedValues.indexOf(option.value) !== -1;
         });
         this.refreshUI();
     },
@@ -188,11 +202,8 @@ BR.RoutingOptions = L.Evented.extend({
 
     resetToDefault() {
         this.setCustomProfile(null, true);
-        const select = L.DomUtil.get('profile-alternative');
-        Array.from(select.options).forEach((option) => {
-            option.selected =
-                option.parentElement.id === 'profile' ? option.value === BR.conf.profiles[0] : option.value === '0';
-        });
+        L.DomUtil.get('profile-alternative').value = BR.conf.profiles[0];
+        L.DomUtil.get('route-alternative').value = '0';
         this.rememberProfile(BR.conf.profiles[0]);
         this.fire('update', { options: this.getOptions() });
     },
@@ -232,6 +243,7 @@ BR.RoutingOptions = L.Evented.extend({
 
     _getChangeHandler() {
         return L.bind(function (evt, clickedIndex, isSelected, previousValue) {
+            if (this.settingOptions) return;
             // bootstrap-select also emits changes for programmatic startup/hash
             // updates, with no clicked index. Only persist an actual user choice.
             if (clickedIndex != null) {
@@ -244,14 +256,46 @@ BR.RoutingOptions = L.Evented.extend({
                     this.rememberProfile(option.value);
                 }
             }
-            this.fire('update', { options: this.getOptions() });
+            this.fire('update', {
+                options: this.getOptions(),
+                alternativeOnly: evt.target.id === 'route-alternative',
+            });
         }, this);
     },
 
+    _exitSelection(picker) {
+        picker.$button.dropdown('hide');
+        const map = L.DomUtil.get('map');
+        if (!map.hasAttribute('tabindex')) map.setAttribute('tabindex', '-1');
+        map.focus();
+    },
+
     _keydownListener(e) {
+        // Escape must work while the normal app shortcuts are blocked by a menu.
+        if (e.keyCode === 27) {
+            const picker = $('#profile-alternative, #route-alternative')
+                .map(function () {
+                    return $(this).data('selectpicker');
+                })
+                .get()
+                .find(
+                    (item) =>
+                        item &&
+                        (item.$newElement.hasClass('show') || item.$newElement[0].contains(document.activeElement))
+                );
+            if (picker) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                this._exitSelection(picker);
+                return;
+            }
+        }
         if (BR.Util.keyboardShortcutsAllowed(e) && e.keyCode === this.options.shortcut.switch) {
-            if (!$('#profile-alternative-form .dropdown').hasClass('show')) {
-                $('#profile-alternative-form button').click();
+            const selector = e.shiftKey ? '#route-alternative' : '#profile-alternative';
+            const picker = $(selector).data('selectpicker');
+            if (picker && !picker.$newElement.hasClass('show')) {
+                e.preventDefault();
+                picker.toggle(e);
             }
         }
     },

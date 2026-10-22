@@ -177,3 +177,143 @@ describe('saved profiles in the navbar', () => {
         expect(options.getOptions()).toEqual({ profile: 'trekking', alternative: '0' });
     });
 });
+
+describe('separate route alternative dropdown', () => {
+    test('changing the alternative keeps the profile and its remembered selection', () => {
+        $('.selectpicker').selectpicker();
+        const options = new BR.RoutingOptions();
+        options.setOptions({ profile: 'shortest' });
+        options.rememberProfile('shortest');
+        const update = jest.fn();
+        options.on('update', update);
+        const alternative = document.getElementById('route-alternative');
+        alternative.value = '2';
+        $(alternative).trigger('changed.bs.select', [2, true, '0']);
+        expect(options.getOptions()).toEqual({ profile: 'shortest', alternative: '2' });
+        expect(localStorage.getItem('routingprofile')).toBe('shortest');
+        expect(update).toHaveBeenCalledTimes(1);
+        expect(update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                options: { profile: 'shortest', alternative: '2' },
+                alternativeOnly: true,
+            })
+        );
+    });
+
+    test('switching saved profiles preserves the alternative', () => {
+        const options = new BR.RoutingOptions();
+        options.setOptions({ alternative: '3' });
+        options.setSavedProfiles([{ id: 'gravel', name: 'Gravel' }], 'gravel');
+        options.setCustomProfile('custom_gravel', true, 'gravel');
+        expect(options.getOptions()).toEqual({ profile: 'custom_gravel', alternative: '3' });
+        options.restoreSelection('trekking');
+        expect(options.getOptions()).toEqual({ profile: 'trekking', alternative: '3' });
+    });
+
+    test('restoring URL options updates both dropdowns without intermediate reroutes', () => {
+        $('.selectpicker').selectpicker();
+        const options = new BR.RoutingOptions();
+        const update = jest.fn();
+        options.on('update', update);
+        options.setOptions({ profile: 'fastbike', alternative: '2' });
+        expect(options.getOptions()).toEqual({ profile: 'fastbike', alternative: '2' });
+        expect(update).not.toHaveBeenCalled();
+        options.setOptions({ alternative: 0 });
+        expect(options.getOptions()).toEqual({ profile: 'fastbike', alternative: '0' });
+    });
+});
+
+describe('dropdown shortcuts', () => {
+    test.each([
+        [false, '#profile-alternative', '#route-alternative'],
+        [true, '#route-alternative', '#profile-alternative'],
+    ])('G with shift=%s opens only its assigned dropdown', (shiftKey, target, other) => {
+        $('.selectpicker').selectpicker();
+        const options = new BR.RoutingOptions();
+        const targetToggle = jest.spyOn($(target).data('selectpicker'), 'toggle').mockImplementation(() => {});
+        const otherToggle = jest.spyOn($(other).data('selectpicker'), 'toggle').mockImplementation(() => {});
+        const event = { keyCode: 71, shiftKey, target: document.body, preventDefault: jest.fn() };
+        options._keydownListener(event);
+        expect(targetToggle).toHaveBeenCalledWith(event);
+        expect(otherToggle).not.toHaveBeenCalled();
+        expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    });
+
+    test('shortcuts do not open dropdowns while typing or using browser modifiers', () => {
+        $('.selectpicker').selectpicker();
+        const options = new BR.RoutingOptions();
+        const profileToggle = jest
+            .spyOn($('#profile-alternative').data('selectpicker'), 'toggle')
+            .mockImplementation(() => {});
+        const alternativeToggle = jest
+            .spyOn($('#route-alternative').data('selectpicker'), 'toggle')
+            .mockImplementation(() => {});
+        const input = document.getElementById('saved-profile-name');
+        input.focus();
+        options._keydownListener({ keyCode: 71, shiftKey: true });
+        input.blur();
+        options._keydownListener({ keyCode: 71, ctrlKey: true });
+        options._keydownListener({ keyCode: 71, metaKey: true });
+        expect(profileToggle).not.toHaveBeenCalled();
+        expect(alternativeToggle).not.toHaveBeenCalled();
+    });
+});
+
+test.each(['#profile-alternative', '#route-alternative'])(
+    'Escape closes %s and allows opening the other dropdown',
+    (selector) => {
+        $('.selectpicker').selectpicker();
+        const options = new BR.RoutingOptions();
+        const picker = $(selector).data('selectpicker');
+        const before = options.getOptions();
+        picker.$newElement.addClass('show');
+        picker.$menu.addClass('show');
+        picker.$button[0].focus();
+        const event = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
+        picker.$button[0].dispatchEvent(event);
+        expect(picker.$newElement.hasClass('show')).toBe(false);
+        expect(document.activeElement).toBe(document.getElementById('map'));
+        expect(options.getOptions()).toEqual(before);
+        const other = selector === '#profile-alternative' ? '#route-alternative' : '#profile-alternative';
+        const toggle = jest.spyOn($(other).data('selectpicker'), 'toggle').mockImplementation(() => {});
+        options._keydownListener({ keyCode: 71, shiftKey: other === '#route-alternative', preventDefault: jest.fn() });
+        expect(toggle).toHaveBeenCalledTimes(1);
+    }
+);
+
+test.each([
+    ['#profile-alternative', 'shortest'],
+    ['#route-alternative', '2'],
+])('Enter confirms a selection in %s and returns focus to the map', async (selector, value) => {
+    $('.selectpicker').selectpicker();
+    const options = new BR.RoutingOptions();
+    options.getOptions();
+    const picker = $(selector).data('selectpicker');
+    const index = Array.from($(selector)[0].options).findIndex((option) => option.value === value);
+    const position = picker.selectpicker.main.data.findIndex((item) => item.option === $(selector)[0].options[index]);
+    const item = picker.selectpicker.main.elements[position];
+    // Highlight an item as keyboard navigation does, without requiring layout.
+    picker.$menuInner.find('li').removeClass('active');
+    $(item).addClass('active');
+    picker.$newElement.addClass('show');
+    picker.$menu.addClass('show');
+    item.firstChild.focus();
+    item.firstChild.dispatchEvent(
+        new KeyboardEvent('keydown', {
+            key: 'Enter',
+            keyCode: 13,
+            which: 13,
+            bubbles: true,
+            cancelable: true,
+        })
+    );
+    // Leave focus untouched through the event's microtask checkpoints so the
+    // browser can finish invoking delegated keyboard handlers.
+    expect($(selector).val()).toBe(value);
+    await Promise.resolve();
+    expect(document.activeElement).not.toBe(document.getElementById('map'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect($(selector).val()).toBe(value);
+    expect(picker.$newElement.hasClass('show')).toBe(false);
+    expect(document.activeElement).toBe(document.getElementById('map'));
+});

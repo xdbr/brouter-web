@@ -74,7 +74,7 @@
     "shortcut-delete-route": "Delete route",
     "shortcut-draw": "Enter draw mode",
     "shortcut-elevation-profile": "Toggle elevation profile",
-    "shortcut-exit-draw": "Exit draw mode or close dialog",
+    "shortcut-exit-draw": "Exit draw mode or close a dialog or dropdown",
     "shortcut-export": "Export route",
     "shortcut-help-dialog": "Open this help dialog",
     "shortcut-load-track": "Load track",
@@ -85,6 +85,7 @@
     "shortcut-nogo": "Draw no-go area (Esc exits this mode)",
     "shortcut-nogo-load": "Load no-go area",
     "shortcut-profile-select": "Select routing profile",
+    "shortcut-alternative-select": "Select route alternative",
     "shortcut-reverse": "Reverse route",
     "shortcut-search": "Search for locations",
     "shortcut-share": "Share route",
@@ -217,6 +218,8 @@
     "or": ""
   },
   "navbar": {
+    "routing-profile": "Routing profile",
+    "route-alternative": "Route alternative",
     "custom-profiles": "Custom profiles",
     "builtin-profiles": "Built-in profiles",
     "about": "About",
