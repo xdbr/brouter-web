@@ -151,6 +151,9 @@
         ];
     }
 
+    // Opt in only for private backends implementing the progressive batch endpoint.
+    BR.conf.useRouteBatches = false;
+
     // regex needs to be in sync with server, see ServerHandler.getTrackName()
     BR.conf.tracknameAllowedChars = 'a-zA-Z0-9 \\._\\-';
 

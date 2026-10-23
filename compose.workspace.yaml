@@ -1,0 +1,77 @@
+name: brouter-web-local
+
+services:
+    prepare:
+        image: brouter-web-routing:local
+        build: ../backend
+        user: '0:0'
+        entrypoint: ['sh', '/source/misc/scripts/standalone/prepare-workspace.sh']
+        volumes:
+            - ../backend:/source:ro
+            - ${BROUTER_DATA_DIR:-../.local/brouter/segments4}:/segments4
+            - profiles:/profiles2
+        restart: 'no'
+
+    brouter:
+        image: brouter-web-routing:local
+        build: ../backend
+        depends_on:
+            prepare:
+                condition: service_completed_successfully
+        ports:
+            - '127.0.0.1:17777:17777'
+        environment:
+            MAXTHREADS: '${BROUTER_MAX_THREADS:-40}'
+            CUSTOMPROFILESPATH: '../customprofiles'
+            JAVA_OPTS: '${BROUTER_JAVA_OPTS:--Xms128M -Xmx16G -DmemoryClass=256
+                -DmaxRunningTime=300 -DuseRFCMimeType=false -DenableBatchRouting=true -DbatchWorkers=4
+                -DsharedGraphCacheMB=${BROUTER_SHARED_GRAPH_CACHE_MB:-256}}'
+        volumes:
+            - ${BROUTER_DATA_DIR:-../.local/brouter/segments4}:/segments4:ro
+            - profiles:/profiles2:ro
+            - custom-profiles:/customprofiles
+        healthcheck:
+            test: ['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:17777/robots.txt']
+            interval: 5s
+            timeout: 3s
+            retries: 12
+            start_period: 10s
+        restart: unless-stopped
+
+    frontend:
+        image: brouter-web-frontend:local
+        build:
+            context: .
+            dockerfile: Dockerfile.local
+        depends_on:
+            brouter:
+                condition: service_healthy
+        ports:
+            - '127.0.0.1:${FRONTEND_PORT:-3000}:3000'
+        environment:
+            BROUTER_URL: http://brouter:17777
+            PROFILES_DIR: /profiles2
+            ROUTE_ESTIMATE_CONCURRENCY: '${ROUTE_ESTIMATE_CONCURRENCY:-32}'
+            ALLOW_AUTO_APPLY: '${ALLOW_AUTO_APPLY:-true}'
+            ALLOW_ROUTE_ESTIMATES: '${ALLOW_ROUTE_ESTIMATES:-true}'
+            USE_ROUTE_BATCHES: '${USE_ROUTE_BATCHES:-true}'
+        volumes:
+            - profiles:/profiles2:ro
+        healthcheck:
+            test:
+                [
+                    'CMD',
+                    'node',
+                    '-e',
+                    'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))',
+                ]
+            interval: 10s
+            timeout: 3s
+            retries: 3
+            start_period: 5s
+        restart: unless-stopped
+
+volumes:
+    profiles:
+    custom-profiles:
+        name: brouter-web-local_custom-profiles

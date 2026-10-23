@@ -145,6 +145,11 @@ L.BRouter = L.Class.extend({
     },
 
     getRoute(latLngs, cb) {
+        if (this.routeImpact && this.routeImpact.getRoute(latLngs, cb)) return;
+        return this.getSingleRoute(latLngs, cb);
+    },
+
+    getSingleRoute(latLngs, cb) {
         var url = this.getUrl(latLngs, null, null, null, 'geojson'),
             xhr = new XMLHttpRequest();
 
@@ -163,6 +168,7 @@ L.BRouter = L.Class.extend({
             cb
         );
         xhr.send();
+        return xhr;
     },
 
     _handleRouteResponse(xhr, cb) {
@@ -180,8 +186,7 @@ L.BRouter = L.Class.extend({
 
             try {
                 geojson = JSON.parse(xhr.responseText);
-                layer = this._assignFeatures(L.geoJSON(geojson).getLayers()[0]);
-                this.checkBRouterVersion(layer.feature.properties.creator);
+                layer = this.routeLayer(geojson);
 
                 return cb(null, layer);
             } catch (e) {
@@ -191,6 +196,12 @@ L.BRouter = L.Class.extend({
         } else {
             cb(BR.Util.getError(xhr));
         }
+    },
+
+    routeLayer(geojson) {
+        const layer = this._assignFeatures(L.geoJSON(geojson).getLayers()[0]);
+        this.checkBRouterVersion(layer.feature.properties.creator);
+        return layer;
     },
 
     versionCheckDone: false,

@@ -1,0 +1,26 @@
+{
+    "settings": {
+        "ratings": { "forest": 3, "water": 3 },
+        "booleans": { "stick_to_cycleroutes": false, "consider_town": false }
+    },
+    "cases": [
+        {
+            "id": "munich-short",
+            "description": "Southern Munich: short urban bicycle route",
+            "lonlats": "11.571926,48.120440|11.565932,48.043483",
+            "alternativeidx": 0
+        },
+        {
+            "id": "munich-ammersee",
+            "description": "Munich to Herrsching: longer mixed urban and rural route",
+            "lonlats": "11.575490,48.137430|11.171970,47.998420",
+            "alternativeidx": 0
+        },
+        {
+            "id": "munich-ammersee-alt1",
+            "description": "Same endpoints, first alternative: additional search work",
+            "lonlats": "11.575490,48.137430|11.171970,47.998420",
+            "alternativeidx": 1
+        }
+    ]
+}

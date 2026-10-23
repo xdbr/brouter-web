@@ -1,9 +1,11 @@
-// Speculative requests have their own profiles and never update the map or library.
+// Batches reuse the displayed route as baseline; legacy previews remain isolated.
 BR.RouteImpact = L.Class.extend({
     initialize(profile, routing, router) {
         this.profile = profile;
         this.routing = routing;
         this.router = router;
+        router.routeImpact = this;
+        this.batchActive = 0;
         this.version = 0;
         this.cache = new Map();
         this.requests = new Set();
@@ -30,10 +32,15 @@ BR.RouteImpact = L.Class.extend({
         $('#profile_params').on('input change', 'input, select', () => this.schedule());
         $('#profileEditorTabs a[data-toggle="tab"]').on('shown.bs.tab', () => this.schedule());
         routing.on(
-            'routing:routeWaypointStart routing:routeWaypointEnd routing:rerouteSegmentStart routing:rerouteSegmentEnd ' +
-                'routing:rerouteAllSegmentsStart routing:rerouteAllSegmentsEnd routing:setWaypointsStart routing:setWaypointsEnd ' +
+            'routing:routeWaypointStart routing:rerouteSegmentStart ' +
+                'routing:rerouteAllSegmentsStart routing:setWaypointsStart ' +
                 'routing:cleared waypoint:click waypoint:dragstart',
             this.schedule,
+            this
+        );
+        routing.on(
+            'routing:routeWaypointEnd routing:rerouteSegmentEnd routing:rerouteAllSegmentsEnd routing:setWaypointsEnd',
+            this.refresh,
             this
         );
         if (routing._waypoints) routing._waypoints.on('layeradd layerremove', this.schedule, this);
@@ -41,7 +48,12 @@ BR.RouteImpact = L.Class.extend({
     },
 
     schedule() {
+        if (this._batchRun && this._matchesBatch(this._batchRun)) {
+            this._renderBatch(this._batchRun);
+            return;
+        }
         const version = ++this.version;
+        this._cancelBatch();
         clearTimeout(this.timer);
         this.requests.forEach((xhr) => xhr.abort());
         this.requests.clear();
@@ -54,6 +66,320 @@ BR.RouteImpact = L.Class.extend({
         if (!this.toggle.checked) return;
         this._status('waiting');
         this.timer = setTimeout(() => this._run(version), 800);
+    },
+
+    refresh() {
+        if (!BR.conf.allowRouteEstimates || !this.toggle.checked) return;
+        if (this._batchRun && this._matchesBatch(this._batchRun)) {
+            this._renderBatch(this._batchRun);
+            this._fillBatches(this._batchRun);
+        } else {
+            clearTimeout(this.timer);
+            this.timer = setTimeout(() => this._run(this.version), 800);
+        }
+    },
+
+    _useBatches() {
+        return !!(
+            BR.conf.useRouteBatches &&
+            BR.conf.allowRouteEstimates &&
+            this.toggle.checked &&
+            !this.batchUnsupported
+        );
+    },
+
+    _normalizedText() {
+        const text = this.profile._currentText();
+        return BR.RidingPreferences.build(text, BR.RidingPreferences.ratings(text));
+    },
+
+    _matchesBatch(run) {
+        try {
+            return (
+                this._useBatches() &&
+                !run.aborted &&
+                this.profile._isParamsFormActive() &&
+                this.profile._validateParams(false) &&
+                run.text === this._normalizedText() &&
+                JSON.stringify(run.urls) === JSON.stringify(this._routeUrls())
+            );
+        } catch (error) {
+            return false;
+        }
+    },
+
+    getRoute(latLngs, callback) {
+        if (
+            !this._useBatches() ||
+            !BR.RouteBatch ||
+            !this.profile._isParamsFormActive() ||
+            !this.profile._validateParams(false) ||
+            this.batchActive >= 6
+        )
+            return false;
+        // Manual drafts must not silently change the profile selected for the map.
+        const source = this.profile.cache[this.router.options.profile];
+        if (!source) return false;
+        const text = this._normalizedText();
+        if (BR.RidingPreferences.build(source, BR.RidingPreferences.ratings(source)) !== text) return false;
+        let run = this._batchRun;
+        if (!run || !this._matchesBatch(run)) {
+            this._cancelBatch();
+            this._clearIndicators();
+            run = this._createBatch(text, this._routeUrls(), this._targets());
+            if (!run) return false;
+            run.profileId = this.router.options.profile;
+            run.uploaded = true;
+        }
+        const preview = L.bRouter(Object.assign({}, this.router.options, { profile: 'route_impact_preview' }));
+        const url = preview.getUrl(latLngs, null, null, null, 'geojson');
+        if (!run.urls.includes(url)) return false;
+        clearTimeout(this.timer);
+        const record = this._startBatch(run, url);
+        const deliver = (error, route) => {
+            if (error) callback(error);
+            else {
+                let layer;
+                try {
+                    layer = this.router.routeLayer(route);
+                } catch (err) {
+                    return callback(err);
+                }
+                callback(null, layer);
+            }
+        };
+        if (record.route) deliver(null, record.route);
+        else if (record.currentError) deliver(record.currentError);
+        else if (record.fallback) this._singleFallback(latLngs, callback);
+        else
+            record.waiters.push({
+                deliver,
+                callback,
+                latLngs,
+                routeKey: this.router.getUrl(latLngs, null, null, null, 'geojson'),
+            });
+        this._fillBatches(run);
+        return true;
+    },
+
+    _createBatch(text, urls, targets) {
+        const scenarios = targets.map((target, index) => ({ id: 'p' + index, target }));
+        // Build ratings from each actual variant, preserving all other draft values.
+        scenarios.forEach((scenario) => {
+            const variant = this.profile._buildCustomProfile(this.profile._getProfileText(), {
+                [scenario.target.input.name]: scenario.target.value,
+            });
+            scenario.variant = BR.RidingPreferences.build(variant, BR.RidingPreferences.ratings(variant));
+            scenario.overrides = this._profileOverrides(text, scenario.variant);
+        });
+        if (!urls.length || !targets.length || scenarios.length > 63 || scenarios.some((s) => s.overrides === null))
+            return null;
+        const run = {
+            version: this.version,
+            text,
+            urls,
+            scenarios,
+            records: new Map(),
+            handles: new Set(),
+            profileId: 'custom_preview_' + Date.now() + '_' + Math.random().toString(36).slice(2),
+        };
+        run.done = new Promise((resolve) => {
+            run.resolve = resolve;
+        });
+        this._batchRun = run;
+        return run;
+    },
+
+    _startBatch(run, url) {
+        if (run.records.has(url)) return run.records.get(url);
+        const record = { stats: new Map(), errors: new Set(), waiters: [], done: false };
+        run.records.set(url, record);
+        this.batchActive++;
+        record.promise = this._uploadBatchBase(run)
+            .then(() => {
+                if (run.aborted || run.version !== this.version) throw new Error('Superseded batch');
+                const params = new URL(url, window.location.href).searchParams;
+                params.set('profile', run.profileId);
+                params.set('scenario.current', '');
+                run.scenarios.forEach(({ id, overrides }) => params.set('scenario.' + id, overrides.replace(/^&/, '')));
+                const handle = BR.RouteBatch.request(BR.conf.host + '/brouter/batch', params, (event) => {
+                    if (run.aborted || run.version !== this.version) return;
+                    if (event.type === 'result' || event.type === 'error') {
+                        if (event.id !== 'current' && !run.scenarios.some(({ id }) => id === event.id))
+                            throw new Error('Invalid scenario');
+                        if (record.stats.has(event.id) || record.errors.has(event.id))
+                            throw new Error('Duplicate scenario');
+                        if (event.type === 'error') {
+                            record.errors.add(event.id);
+                            if (event.id === 'current') this._deliverCurrent(record, event.message || 'Routing failed');
+                        } else {
+                            if (!Number.isFinite(event.distance) || !Number.isFinite(event.time))
+                                throw new Error('Invalid route totals');
+                            if (event.id === 'current' && !event.route?.features?.length)
+                                throw new Error('Missing current route');
+                            record.stats.set(event.id, { distance: event.distance, time: event.time });
+                            if (event.id === 'current') {
+                                record.route = event.route;
+                                this._deliverCurrent(record, null, event.route);
+                            }
+                        }
+                    } else if (event.type === 'complete') {
+                        if (
+                            event.cancelled ||
+                            event.completed !== run.scenarios.length + 1 ||
+                            record.stats.size + record.errors.size !== run.scenarios.length + 1
+                        )
+                            throw new Error('Incomplete batch');
+                    } else if (!['start', 'heartbeat'].includes(event.type)) throw new Error('Invalid batch event');
+                    this._renderBatch(run);
+                });
+                this.requests.add(handle);
+                run.handles.add(handle);
+                return handle.promise.finally(() => {
+                    this.requests.delete(handle);
+                    run.handles.delete(handle);
+                });
+            })
+            .catch((error) => {
+                if (run.aborted || run.version !== this.version) return;
+                if ([404, 405, 501].includes(error.status)) {
+                    this.batchUnsupported = true;
+                    // Preserve already displayed geometry while cancelling obsolete speculative work.
+                    this._cancelBatch();
+                    this.refresh();
+                    return;
+                }
+                ['current', ...run.scenarios.map(({ id }) => id)].forEach((id) => {
+                    if (!record.stats.has(id)) record.errors.add(id);
+                });
+                if (!record.route) {
+                    record.fallback = true;
+                    const waiters = record.waiters.splice(0);
+                    waiters.forEach(({ callback, latLngs, routeKey }) =>
+                        this._singleFallback(latLngs, callback, routeKey)
+                    );
+                }
+            })
+            .finally(() => {
+                record.done = true;
+                this.batchActive--;
+                if (!run.aborted && run.version === this.version) {
+                    this._renderBatch(run);
+                    this._fillBatches(run);
+                } else if (this._batchRun) {
+                    this._fillBatches(this._batchRun);
+                }
+            });
+        return record;
+    },
+
+    _deliverCurrent(record, error, route) {
+        record.currentError = error;
+        record.waiters.splice(0).forEach(({ deliver }) => deliver(error, route));
+    },
+
+    _fillBatches(run) {
+        if (run.aborted || run.version !== this.version) return;
+        for (const url of run.urls) {
+            if (this.batchActive >= 2) break;
+            if (!run.records.has(url)) this._startBatch(run, url);
+        }
+        if (run.urls.every((url) => run.records.get(url)?.done)) run.resolve();
+    },
+
+    async _uploadBatchBase(run) {
+        if (run.uploaded) return;
+        if (!run.uploading)
+            run.uploading = this._request('POST', L.BRouter.URL_PROFILE_UPLOAD + '/' + run.profileId, run.text).then(
+                (uploaded) => {
+                    if (uploaded.error || !/^custom_[\w-]+$/.test(uploaded.profileid || ''))
+                        throw new Error('Profile upload failed');
+                    run.profileId = uploaded.profileid;
+                    run.uploaded = true;
+                }
+            );
+        return run.uploading;
+    },
+
+    _cancelBatch() {
+        const run = this._batchRun;
+        if (!run) return;
+        run.aborted = true;
+        run.resolve();
+        run.records.forEach((record) => {
+            record.waiters.splice(0).forEach(({ deliver, callback, latLngs, routeKey }) => {
+                if (this._isCurrentLeg(latLngs, routeKey)) this._singleFallback(latLngs, callback, routeKey);
+                else deliver(L.BRouter.ABORTED_ERROR);
+            });
+        });
+        run.handles.forEach((handle) => {
+            this.requests.delete(handle);
+            handle.abort();
+        });
+        this._batchRun = null;
+    },
+
+    _isCurrentLeg(latLngs, routeKey) {
+        const preview = L.bRouter(Object.assign({}, this.router.options, { profile: 'route_impact_preview' }));
+        return (
+            this.router.getUrl(latLngs, null, null, null, 'geojson') === routeKey &&
+            this._routeUrls().includes(preview.getUrl(latLngs, null, null, null, 'geojson'))
+        );
+    },
+
+    _singleFallback(latLngs, callback, routeKey = this.router.getUrl(latLngs, null, null, null, 'geojson')) {
+        this.router.getSingleRoute(latLngs, (error, layer) => {
+            if (!this._isCurrentLeg(latLngs, routeKey)) callback(L.BRouter.ABORTED_ERROR);
+            else callback(error, layer);
+        });
+    },
+
+    _renderBatch(run) {
+        if (run.aborted || run.version !== this.version) return;
+        if (run.scenarios.some(({ target }) => document.getElementById(target.output.id) !== target.output)) {
+            const targets = this._targets();
+            run.scenarios.forEach((scenario) => {
+                scenario.target =
+                    targets.find(({ output }) => output.id === scenario.target.output.id) || scenario.target;
+            });
+        }
+        const total = (id) =>
+            run.urls.reduce(
+                (sum, url) => {
+                    const stats = run.records.get(url)?.stats.get(id);
+                    return stats && sum
+                        ? { distance: sum.distance + stats.distance, time: sum.time + stats.time }
+                        : null;
+                },
+                { distance: 0, time: 0 }
+            );
+        const baseline = total('current');
+        let done = 0,
+            failed = false;
+        run.scenarios.forEach(({ id, target, variant }) => {
+            const unavailable = run.urls.some(
+                (url) => run.records.get(url)?.errors.has(id) || run.records.get(url)?.errors.has('current')
+            );
+            const stats = total(id);
+            if (unavailable) {
+                target.output.textContent = i18next.t('sidebar.profile.estimates-failed');
+                done++;
+                failed = true;
+            } else if (baseline && stats) {
+                const delta = this._formatDelta(stats.time - baseline.time, stats.distance - baseline.distance);
+                target.output.textContent =
+                    target.input.type === 'checkbox'
+                        ? i18next.t('sidebar.profile.estimates-if-' + (target.value ? 'on' : 'off'), { delta })
+                        : delta;
+                this.cache.set(JSON.stringify([run.urls, variant]), stats);
+                if (this.cache.size > 96) this.cache.delete(this.cache.keys().next().value);
+                done++;
+            }
+        });
+        this._status(done === run.scenarios.length ? (failed ? 'partial' : 'ready') : 'calculating', {
+            done,
+            total: run.scenarios.length,
+        });
     },
 
     _status(key, args) {
@@ -145,7 +471,12 @@ BR.RouteImpact = L.Class.extend({
     },
 
     async _run(version) {
-        if (version !== this.version) return;
+        if (version !== this.version || !BR.conf.allowRouteEstimates || !this.toggle.checked) return;
+        if (this._batchRun && this._matchesBatch(this._batchRun)) {
+            this._renderBatch(this._batchRun);
+            this._fillBatches(this._batchRun);
+            return this._batchRun.done;
+        }
         if (!this.profile._isParamsFormActive()) return this._status('options');
         if (this.profile._applyInFlight || !this.router.queue.idle() || this.routing._routingAll) {
             this.timer = setTimeout(() => this._run(version), 500);
@@ -164,6 +495,13 @@ BR.RouteImpact = L.Class.extend({
             // A separate namespace also avoids timestamp-ID collisions with real Apply uploads.
             profileId: 'custom_preview_' + Date.now() + '_' + Math.random().toString(36).slice(2),
         };
+        if (this._useBatches() && BR.RouteBatch) {
+            const batch = this._createBatch(text, urls, targets);
+            if (batch) {
+                this._fillBatches(batch);
+                return batch.done;
+            }
+        }
         let failed = false;
         try {
             this._status('calculating', { done: 0, total: targets.length });

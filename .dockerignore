@@ -1,0 +1,9 @@
+.git
+node_modules
+dist
+config.js
+keys.js
+.local
+*.zip
+yarn-error.log
+package-lock.json

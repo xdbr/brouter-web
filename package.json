@@ -13,6 +13,9 @@
         "lint": "eslint .",
         "prettier": "prettier --write '**/*'",
         "serve": "gulp serve watch",
+        "serve:local": "node tools/serve-local.cjs",
+        "backend:up": "sh ../backend/misc/scripts/standalone/start-local.sh",
+        "backend:down": "docker compose -f ../backend/compose.local.yaml down",
         "standalone": "../brouter/gradlew -p ../brouter clean build && ../brouter/misc/scripts/generate_profile_variants.sh && gulp release:zip_standalone",
         "prepare": "husky install"
     },

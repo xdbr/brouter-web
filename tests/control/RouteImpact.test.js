@@ -5,9 +5,11 @@ BR = { conf: { host: 'http://localhost', profiles: ['trekking'] } };
 $ = require('jquery');
 async = require('async');
 i18next = require('i18next');
+compareVersions = require('compare-versions');
 require('leaflet');
 require('../../js/router/BRouter.js');
 require('../../js/util/RidingPreferences.js');
+require('../../js/util/RouteBatch.js');
 require('../../js/control/Profile.js');
 require('../../js/control/RouteImpact.js');
 
@@ -384,4 +386,193 @@ test('structural profile changes fall back to a separate upload without overwrit
     expect(posts).toHaveLength(2);
     expect(posts[1][1]).toBe(L.BRouter.URL_PROFILE_UPLOAD + '/custom_preview_variant_1');
     expect(run.profileId).toBe('custom_preview');
+});
+
+function batchMock() {
+    BR.conf.useRouteBatches = true;
+    profile.cache[router.options.profile] = impact._normalizedText();
+    const calls = [];
+    jest.spyOn(BR.RouteBatch, 'request').mockImplementation((url, params, onEvent) => {
+        let resolve, reject;
+        const promise = new Promise((yes, no) => {
+            resolve = yes;
+            reject = no;
+        });
+        const call = {
+            url,
+            params: new URLSearchParams(params),
+            emit: onEvent,
+            resolve,
+            reject,
+            promise,
+            abort: jest.fn(() => reject(Object.assign(new Error('aborted'), { aborted: true }))),
+        };
+        calls.push(call);
+        return call;
+    });
+    return calls;
+}
+
+const batchRoute = (distance = 10000, time = 1800) => ({
+    type: 'FeatureCollection',
+    features: [
+        {
+            type: 'Feature',
+            properties: { creator: 'BRouter-1.7.9', 'track-length': String(distance), 'total-time': String(time) },
+            geometry: {
+                type: 'LineString',
+                coordinates: [
+                    [11.57, 48.12],
+                    [11.56, 48.04],
+                ],
+            },
+        },
+    ],
+});
+
+async function flushBatch() {
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+}
+
+function finishBatch(call, run, distance = 10000, time = 1800, skip = []) {
+    run.scenarios
+        .filter(({ id }) => !skip.includes(id))
+        .forEach(({ id }) => call.emit({ type: 'result', id, distance, time }));
+    call.emit({ type: 'complete', completed: run.scenarios.length + 1, cancelled: false });
+    call.resolve();
+}
+
+test('foreground batch updates the map before estimates finish and reuses its baseline', async () => {
+    const calls = batchMock();
+    const callback = jest.fn();
+    expect(impact.getRoute(routing.getWaypoints(), callback)).toBe(true);
+    await flushBatch();
+    expect(calls).toHaveLength(1);
+    expect(impact._request).not.toHaveBeenCalled();
+    const run = impact._batchRun;
+    calls[0].emit({ type: 'result', id: 'current', distance: 10000, time: 1800, route: batchRoute() });
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback.mock.calls[0][1].feature.properties['track-length']).toBe('10000');
+    expect(calls[0].abort).not.toHaveBeenCalled();
+    const version = impact.version;
+    routing.fire('routing:routeWaypointEnd');
+    expect(impact.version).toBe(version);
+    expect(calls[0].abort).not.toHaveBeenCalled();
+    const forest = run.scenarios.find(
+        ({ target }) => target.input.name === 'rider_pref_forest' && target.value === '5'
+    );
+    calls[0].emit({ type: 'result', id: forest.id, distance: 11000, time: 2100 });
+    expect(document.getElementById('route-impact-rider_pref_forest-5').textContent).toBe('+5 min, +1 km');
+    finishBatch(calls[0], run, 10000, 1800, [forest.id]);
+    await run.done;
+    expect(impact.status.textContent).toContain('Estimates ready');
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+});
+
+test('editing an unapplied setting cancels previews but preserves the pending map route', async () => {
+    const calls = batchMock();
+    const callback = jest.fn();
+    const layer = { legacy: true };
+    jest.spyOn(router, 'getSingleRoute').mockImplementation((points, cb) => cb(null, layer));
+    impact.getRoute(routing.getWaypoints(), callback);
+    await flushBatch();
+    document.querySelector('[name="rider_pref_forest"][value="5"]').checked = true;
+    document
+        .querySelector('[name="rider_pref_forest"][value="5"]')
+        .dispatchEvent(new Event('change', { bubbles: true }));
+    expect(calls[0].abort).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(null, layer);
+    calls[0].emit({ type: 'result', id: 'current', distance: 1, time: 1, route: batchRoute(1, 1) });
+    await flushBatch();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('[data-route-impact]')).toHaveLength(0);
+});
+
+test('turning estimates off preserves a pending map request via the single-route path', async () => {
+    const calls = batchMock();
+    const callback = jest.fn();
+    const layer = { legacy: true };
+    jest.spyOn(router, 'getSingleRoute').mockImplementation((points, cb) => cb(null, layer));
+    impact.getRoute(routing.getWaypoints(), callback);
+    await flushBatch();
+    impact.toggle.click();
+    await flushBatch();
+    expect(calls[0].abort).toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(null, layer);
+    expect(impact.status.textContent).toBe('');
+    routing.fire('routing:routeWaypointEnd');
+    jest.advanceTimersByTime(2000);
+    await flushBatch();
+    expect(impact._request).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(impact.status.textContent).toBe('');
+});
+
+test('missing endpoint falls back once without duplicating the map callback', async () => {
+    const calls = batchMock();
+    const callback = jest.fn();
+    const layer = { legacy: true };
+    jest.spyOn(router, 'getSingleRoute').mockImplementation((points, cb) => cb(null, layer));
+    impact.getRoute(routing.getWaypoints(), callback);
+    await flushBatch();
+    calls[0].reject(Object.assign(new Error('missing'), { status: 404 }));
+    await flushBatch();
+    expect(impact.batchUnsupported).toBe(true);
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(null, layer);
+    expect(impact.getRoute(routing.getWaypoints(), jest.fn())).toBe(false);
+});
+
+test('leg batches preserve alternatives, nogos and beelines, aggregating totals only when ready', async () => {
+    const points = [L.latLng(48.12, 11.57), L.latLng(48.04, 11.56), L.latLng(48, 11.5), L.latLng(47.9, 11.4)];
+    routing.getWaypoints.mockReturnValue(points);
+    routing.getBeelineFlags.mockReturnValue([false, true, false]);
+    router.options.alternative = 1;
+    router.options.nogos = [L.circle([48.1, 11.6], { radius: 100 })];
+    const calls = batchMock();
+    const callback = jest.fn();
+    impact.getRoute(points.slice(0, 2), callback);
+    await flushBatch();
+    expect(calls).toHaveLength(2);
+    calls.forEach(({ params }) => {
+        expect(params.get('alternativeidx')).toBe('1');
+        expect(params.get('nogos')).toBe('11.6,48.1,100');
+    });
+    expect(calls[1].params.get('lonlats')).toBe('11.5,48|11.4,47.9');
+    const run = impact._batchRun;
+    const forest = run.scenarios.find(
+        ({ target }) => target.input.name === 'rider_pref_forest' && target.value === '5'
+    );
+    calls[0].emit({ type: 'result', id: 'current', distance: 10000, time: 1800, route: batchRoute() });
+    calls[0].emit({ type: 'result', id: forest.id, distance: 11000, time: 2100 });
+    expect(forest.target.output.textContent).toBe('…');
+    calls[1].emit({ type: 'result', id: forest.id, distance: 19500, time: 2200 });
+    calls[1].emit({ type: 'result', id: 'current', distance: 20000, time: 2000, route: batchRoute(20000, 2000) });
+    expect(forest.target.output.textContent).toBe('+8 min, +0.5 km');
+    finishBatch(calls[0], run, 10000, 1800, [forest.id]);
+    finishBatch(calls[1], run, 20000, 2000, [forest.id]);
+    await run.done;
+    expect(callback).toHaveBeenCalledTimes(1);
+});
+
+test('manual drafts are not applied to the map by preview batching', () => {
+    batchMock();
+    document.querySelector('[name="rider_pref_forest"][value="5"]').checked = true;
+    expect(impact.getRoute(routing.getWaypoints(), jest.fn())).toBe(false);
+    expect(BR.RouteBatch.request).not.toHaveBeenCalled();
+});
+
+test('changing the actual route rejects old geometry instead of requesting a stale fallback', async () => {
+    const calls = batchMock();
+    const callback = jest.fn();
+    const single = jest.spyOn(router, 'getSingleRoute');
+    impact.getRoute(routing.getWaypoints(), callback);
+    await flushBatch();
+    router.options.alternative = 1;
+    routing.fire('routing:rerouteSegmentStart');
+    expect(callback).toHaveBeenCalledWith(L.BRouter.ABORTED_ERROR);
+    expect(single).not.toHaveBeenCalled();
+    expect(calls[0].abort).toHaveBeenCalledTimes(1);
 });
